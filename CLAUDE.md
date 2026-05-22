@@ -76,6 +76,8 @@ Go code from these queries. Do not use an ORM. Do not write manual `database/sql
 boilerplate. When adding a new query, add it to the appropriate `.sql` file and re-run
 `sqlc generate`.
 
+**Note:** `sqlc.yaml` schema must point at `.up.sql` migration files only — never at the migrations directory as a whole.
+
 ### AT Protocol OAuth (not app passwords)
 DraftSky is multi-user and public. Auth uses the AT Protocol OAuth 2.0 PKCE flow, not
 app passwords. Each user authenticates through their own PDS (Personal Data Server).
