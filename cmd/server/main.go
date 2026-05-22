@@ -108,8 +108,16 @@ func main() {
 	r.POST("/auth/logout", authHandler.HandleLogout)
 
 	// Protected route group — all routes added here require a valid session cookie.
-	_ = r.Group("/api", middleware.RequireAuth(secret))
-	// (API route handlers wired up in subsequent phases)
+	api := r.Group("/api", middleware.RequireAuth(secret))
+
+	templateH := handlers.NewTemplateHandler(queries, pool)
+	// /reorder must be registered before /:id so Gin's static-segment priority
+	// kicks in and "reorder" is never matched as a template ID.
+	api.PUT("/templates/reorder", templateH.HandleReorderTemplates)
+	api.GET("/templates", templateH.HandleGetTemplates)
+	api.POST("/templates", templateH.HandleCreateTemplate)
+	api.PUT("/templates/:id", templateH.HandleUpdateTemplate)
+	api.DELETE("/templates/:id", templateH.HandleDeleteTemplate)
 
 	slog.Info("starting server", "port", port, "env", appEnv)
 	if err := r.Run(":" + port); err != nil {
