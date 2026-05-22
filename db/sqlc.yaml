@@ -2,8 +2,11 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: "../internal/db/queries"
-    schema: "../migrations"
+    schema:
+      - "../migrations/000001_create_users.up.sql"
+      - "../migrations/000002_create_templates.up.sql"
     gen:
       go:
         package: "db"
         out: "../internal/db/sqlc"
+        sql_package: "pgx/v5"
