@@ -1,0 +1,14 @@
+.env
+*.env.local
+
+# Build output
+/draftsky
+/server
+
+# Go
+*.test
+*.out
+vendor/
+
+# OS
+.DS_Store
