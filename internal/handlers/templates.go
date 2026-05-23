@@ -91,6 +91,13 @@ func isUniqueViolation(err error) bool {
 // GET /api/templates
 // ---------------------------------------------------------------------------
 
+// HandleGetComposerTemplates is an alias for HandleGetTemplates used by the
+// composer modal. Keeping it as a separate route makes the endpoint discoverable
+// and allows independent rate-limiting in a future phase.
+func (h *TemplateHandler) HandleGetComposerTemplates(c *gin.Context) {
+	h.HandleGetTemplates(c)
+}
+
 // HandleGetTemplates returns all templates owned by the authenticated user,
 // ordered by position ascending.
 func (h *TemplateHandler) HandleGetTemplates(c *gin.Context) {

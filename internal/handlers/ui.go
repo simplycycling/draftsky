@@ -42,6 +42,7 @@ type UIHandler struct {
 func NewUIHandler(queries *db.Queries, secret []byte) (*UIHandler, error) {
 	tmplHome, err := template.ParseFiles(
 		"templates/layout.html",
+		"templates/partials/composer.html",
 		"templates/index.html",
 	)
 	if err != nil {

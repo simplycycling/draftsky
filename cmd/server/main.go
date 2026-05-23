@@ -137,6 +137,7 @@ func main() {
 	api.POST("/templates", templateH.HandleCreateTemplate)
 	api.PUT("/templates/:id", templateH.HandleUpdateTemplate)
 	api.DELETE("/templates/:id", templateH.HandleDeleteTemplate)
+	api.GET("/composer/templates", templateH.HandleGetComposerTemplates)
 
 	postH := handlers.NewPostHandler(queries, poster)
 	api.POST("/post", postH.HandleCreatePost)

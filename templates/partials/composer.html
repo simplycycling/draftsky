@@ -1,0 +1,41 @@
+{{define "composer"}}
+<div id="composer-overlay" class="composer-overlay" style="display:none" onclick="closeComposer()">
+    <div class="composer-modal" onclick="event.stopPropagation()">
+
+        <div class="composer-toolbar-top">
+            <button type="button" class="btn-cancel" onclick="closeComposer()">Cancel</button>
+            <button type="button" id="composer-post-btn" class="btn-post" onclick="submitPost()" disabled>Post</button>
+        </div>
+
+        <div class="composer-body">
+            <div class="composer-avatar">
+                {{if .User.Avatar}}
+                <img class="avatar-img" src="{{.User.Avatar}}" alt="Avatar">
+                {{else}}
+                <div class="avatar-placeholder"></div>
+                {{end}}
+            </div>
+            <textarea
+                id="composer-textarea"
+                class="composer-textarea"
+                placeholder="What's up?"
+                oninput="updateCounter()"
+                autocomplete="off"
+                spellcheck="true"
+            ></textarea>
+        </div>
+
+        <div id="suffix-preview" class="composer-suffix-preview" style="display:none"></div>
+
+        <div class="composer-footer">
+            <select id="template-select" class="composer-select" onchange="onTemplateChange()">
+                <option value="">No template</option>
+            </select>
+            <span id="char-counter" class="char-counter">300</span>
+        </div>
+
+        <div id="composer-error" class="composer-error" style="display:none"></div>
+
+    </div>
+</div>
+{{end}}
