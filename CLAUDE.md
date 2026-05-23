@@ -76,8 +76,6 @@ Go code from these queries. Do not use an ORM. Do not write manual `database/sql
 boilerplate. When adding a new query, add it to the appropriate `.sql` file and re-run
 `sqlc generate`.
 
-**Note:** `sqlc.yaml` schema must point at `.up.sql` migration files only — never at the migrations directory as a whole.
-
 ### AT Protocol OAuth (not app passwords)
 DraftSky is multi-user and public. Auth uses the AT Protocol OAuth 2.0 PKCE flow, not
 app passwords. Each user authenticates through their own PDS (Personal Data Server).
@@ -119,6 +117,7 @@ CREATE TABLE users (
     access_token  TEXT,
     refresh_token TEXT,
     token_expiry  TIMESTAMPTZ,
+    plan          TEXT NOT NULL DEFAULT 'free', -- 'free' | 'paid'; set to 'paid' on verified IAP
     created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -266,6 +265,31 @@ github.com/bluesky-social/indigo
 github.com/golang-migrate/migrate/v4
 sqlc (CLI tool — see https://sqlc.dev)
 ```
+
+---
+
+## Monetisation
+
+DraftSky uses a freemium model on web and an ad-supported + one-time purchase model on iOS.
+
+**Web (future):**
+- Free tier: up to 5 templates, Following feed, basic posting
+- Paid tier: unlimited templates, tabbed hashtag feed (Phase 2), future features
+- Enforced via the `plan` column on the `users` table
+
+**iOS (Phase 3):**
+- Ads shown by default (AdMob or equivalent)
+- Non-consumable IAP via StoreKit 2 to remove ads permanently
+- Purchase is tied to the user's DID, not the device — buying on iOS sets `plan = 'paid'`
+  server-side, removing ads on both iOS and web
+- **Server-side Apple receipt verification is mandatory** — never trust the client to
+  self-report a successful purchase. Verify via Apple's API before updating `plan`
+- Apple Small Business Program (15% vs 30% cut) — apply at launch
+
+**Architecture note:**
+The `plan` column is already in the schema. No handler currently checks it — add
+enforcement when freemium tiers are introduced. A middleware helper `RequirePaidPlan`
+should be added at that point, following the same pattern as `RequireAuth`.
 
 ---
 
