@@ -1,0 +1,35 @@
+{{define "login"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DraftSky — Sign In</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="ocean">
+
+<div class="login-page">
+    <div class="login-card">
+        <div class="login-logo">DraftSky</div>
+        <p class="login-tagline">Post to Bluesky with templates</p>
+        <form action="/auth/login" method="GET">
+            <input
+                class="login-input"
+                type="text"
+                name="handle"
+                placeholder="your.handle.bsky.social"
+                autocomplete="username"
+                spellcheck="false"
+                autocorrect="off"
+                autocapitalize="off"
+                required
+            >
+            <button type="submit" class="btn-signin">Sign in with Bluesky</button>
+        </form>
+    </div>
+</div>
+
+</body>
+</html>
+{{end}}

@@ -1,0 +1,62 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DraftSky</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="{{ .Theme }}">
+
+<div class="app">
+
+    <!-- Left Rail -->
+    <aside class="left-rail">
+        <div class="left-rail-inner">
+            <div class="profile">
+                {{if .User.Avatar}}
+                <img class="avatar-img" src="{{.User.Avatar}}" alt="Avatar">
+                {{else}}
+                <div class="avatar-placeholder"></div>
+                {{end}}
+                <span class="handle">@{{.User.Handle}}</span>
+            </div>
+
+            <nav class="nav">
+                <a href="/" class="nav-link">Home</a>
+                <a href="/templates" class="nav-link">Templates</a>
+                <a href="/settings" class="nav-link">Settings</a>
+                <form action="/auth/logout" method="POST" style="margin-top: auto; padding-top: 8px;">
+                    <button type="submit" class="nav-link btn-logout">Sign out</button>
+                </form>
+            </nav>
+
+            <button class="btn-new-post">New Post</button>
+        </div>
+    </aside>
+
+    <!-- Centre -->
+    <main class="centre">
+        {{template "content" .}}
+    </main>
+
+    <!-- Right Rail -->
+    <aside class="right-rail">
+        <h2 class="rail-heading">Recent Tags</h2>
+        {{if .RecentTags}}
+        <ul class="recent-tags">
+            {{range .RecentTags}}
+            <li><a href="/api/feed/hashtags?tags={{.}}" class="tag-link">#{{.}}</a></li>
+            {{end}}
+        </ul>
+        {{else}}
+        <p class="muted-text">No recent tags yet.</p>
+        {{end}}
+    </aside>
+
+</div>
+
+</body>
+</html>
+{{end}}

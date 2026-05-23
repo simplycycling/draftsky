@@ -11,8 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getRecentTagsByUser = `-- name: GetRecentTagsByUser :many
+SELECT tag::text AS tag, MAX(ph.created_at) AS last_used
+FROM post_history ph, unnest(ph.hashtags) AS tag
+WHERE ph.user_id = $1
+GROUP BY tag
+ORDER BY last_used DESC
+LIMIT 10
+`
+
+type GetRecentTagsByUserRow struct {
+	Tag      string
+	LastUsed interface{}
+}
+
+func (q *Queries) GetRecentTagsByUser(ctx context.Context, userID pgtype.Int4) ([]GetRecentTagsByUserRow, error) {
+	rows, err := q.db.Query(ctx, getRecentTagsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetRecentTagsByUserRow
+	for rows.Next() {
+		var i GetRecentTagsByUserRow
+		if err := rows.Scan(&i.Tag, &i.LastUsed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getUserByDID = `-- name: GetUserByDID :one
-SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan FROM users WHERE did = $1
+SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme FROM users WHERE did = $1
 `
 
 func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
@@ -27,6 +61,7 @@ func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
 		&i.TokenExpiry,
 		&i.CreatedAt,
 		&i.Plan,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -37,7 +72,7 @@ SET access_token  = $2,
     refresh_token = $3,
     token_expiry  = $4
 WHERE did = $1
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme
 `
 
 type UpdateUserTokensParams struct {
@@ -64,6 +99,7 @@ func (q *Queries) UpdateUserTokens(ctx context.Context, arg UpdateUserTokensPara
 		&i.TokenExpiry,
 		&i.CreatedAt,
 		&i.Plan,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -76,7 +112,7 @@ ON CONFLICT (did) DO UPDATE SET
     access_token  = EXCLUDED.access_token,
     refresh_token = EXCLUDED.refresh_token,
     token_expiry  = EXCLUDED.token_expiry
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme
 `
 
 type UpsertUserParams struct {
@@ -105,6 +141,7 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.TokenExpiry,
 		&i.CreatedAt,
 		&i.Plan,
+		&i.Theme,
 	)
 	return i, err
 }

@@ -18,3 +18,11 @@ SET access_token  = $2,
     token_expiry  = $4
 WHERE did = $1
 RETURNING *;
+
+-- name: GetRecentTagsByUser :many
+SELECT tag::text AS tag, MAX(ph.created_at) AS last_used
+FROM post_history ph, unnest(ph.hashtags) AS tag
+WHERE ph.user_id = $1
+GROUP BY tag
+ORDER BY last_used DESC
+LIMIT 10;

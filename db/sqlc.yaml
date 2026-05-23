@@ -6,6 +6,8 @@ sql:
       - "../migrations/000001_create_users.up.sql"
       - "../migrations/000002_create_templates.up.sql"
       - "../migrations/000003_add_plan_to_users.up.sql"
+      - "../migrations/000004_create_post_history.up.sql"
+      - "../migrations/000005_add_theme_to_users.up.sql"
     gen:
       go:
         package: "db"

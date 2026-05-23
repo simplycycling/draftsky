@@ -103,6 +103,9 @@ func main() {
 	secure := appEnv == "production"
 	authHandler := auth.NewHandler(oauthApp, queries, secret, secure)
 
+	// Static assets
+	r.Static("/static", "./static")
+
 	// Public routes
 	r.GET("/health", handlers.HandleHealth)
 	r.GET("/client-metadata.json", authHandler.HandleClientMetadata)
@@ -110,6 +113,18 @@ func main() {
 	r.GET("/auth/login", authHandler.HandleLogin)
 	r.GET("/auth/callback", authHandler.HandleCallback)
 	r.POST("/auth/logout", authHandler.HandleLogout)
+
+	// Login page (redirects to / if already authenticated)
+	uiH, err := handlers.NewUIHandler(queries, secret)
+	if err != nil {
+		slog.Error("failed to parse templates", "err", err)
+		os.Exit(1)
+	}
+	r.GET("/login", uiH.HandleLoginPage)
+
+	// Authenticated web UI routes
+	web := r.Group("/", middleware.RequireSession(secret))
+	web.GET("", uiH.HandleHome)
 
 	// Protected route group — all routes added here require a valid session cookie.
 	api := r.Group("/api", middleware.RequireAuth(secret))

@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type PostHistory struct {
+	ID        int32
+	UserID    pgtype.Int4
+	Uri       string
+	Hashtags  []string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Template struct {
 	ID        int32
 	UserID    pgtype.Int4
@@ -26,4 +34,5 @@ type User struct {
 	TokenExpiry  pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
 	Plan         string
+	Theme        string
 }

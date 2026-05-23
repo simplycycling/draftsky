@@ -1,0 +1,331 @@
+/* =========================================================
+   CSS custom properties — Deep Ocean (default / free theme)
+   All colour values live here. Component rules reference
+   only variables; no hex literals appear outside this block.
+   ========================================================= */
+:root {
+    --color-bg:      #070d1a;
+    --color-surface: #0d1829;
+    --color-card:    #132038;
+    --color-accent:  #34d399;
+    --color-text:    #dbeafe;
+    --color-muted:   #4b6080;
+
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+            Helvetica, Arial, sans-serif;
+    --radius:       8px;
+    --radius-full:  9999px;
+    --rail-l:       260px;
+    --rail-r:       280px;
+    --centre-max:   600px;
+}
+
+/* ---- Paid theme overrides ---- */
+
+body.slate {
+    --color-bg:      #0f1117;
+    --color-surface: #181c27;
+    --color-card:    #222840;
+    --color-accent:  #7c9ef8;
+    --color-text:    #c8d4f0;
+    --color-muted:   #556080;
+}
+
+body.amber {
+    --color-bg:      #111111;
+    --color-surface: #1a1a1a;
+    --color-card:    #242424;
+    --color-accent:  #f59e0b;
+    --color-text:    #f0e8d0;
+    --color-muted:   #88806a;
+}
+
+body.graphite {
+    --color-bg:      #131416;
+    --color-surface: #1c1f23;
+    --color-card:    #252830;
+    --color-accent:  #38bdf8;
+    --color-text:    #c0d4e0;
+    --color-muted:   #505c68;
+}
+
+/* =========================================================
+   Reset / base
+   ========================================================= */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.5;
+    min-height: 100vh;
+}
+
+a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+button {
+    font-family: inherit;
+    cursor: pointer;
+}
+
+/* =========================================================
+   Three-column app shell
+   ========================================================= */
+
+.app {
+    display: grid;
+    grid-template-columns: var(--rail-l) 1fr var(--rail-r);
+    min-height: 100vh;
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+/* ---- Left rail ---- */
+
+.left-rail {
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-card);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.left-rail-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.profile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 4px 20px;
+    border-bottom: 1px solid var(--color-card);
+    margin-bottom: 16px;
+}
+
+.avatar-img,
+.avatar-placeholder {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--color-card);
+}
+
+.handle {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.nav-link {
+    display: block;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background 0.12s;
+}
+
+.nav-link:hover {
+    background: var(--color-card);
+    text-decoration: none;
+}
+
+.btn-logout {
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    color: var(--color-muted);
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.btn-logout:hover {
+    color: var(--color-text);
+    background: var(--color-card);
+}
+
+.btn-new-post {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    margin-top: 20px;
+    background: var(--color-accent);
+    color: #000;
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    transition: opacity 0.12s;
+}
+
+.btn-new-post:hover {
+    opacity: 0.88;
+}
+
+/* ---- Centre ---- */
+
+.centre {
+    border-left: 1px solid var(--color-card);
+    border-right: 1px solid var(--color-card);
+    min-height: 100vh;
+}
+
+.centre-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: var(--color-muted);
+}
+
+/* ---- Right rail ---- */
+
+.right-rail {
+    background: var(--color-surface);
+    border-left: 1px solid var(--color-card);
+    padding: 24px 16px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.rail-heading {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-muted);
+    margin-bottom: 12px;
+}
+
+.recent-tags {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.tag-link {
+    color: var(--color-accent);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.muted-text {
+    color: var(--color-muted);
+    font-size: 0.88rem;
+}
+
+/* =========================================================
+   Login page
+   ========================================================= */
+
+.login-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.login-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    padding: 40px 36px;
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+}
+
+.login-logo {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--color-accent);
+    letter-spacing: -0.02em;
+    margin-bottom: 6px;
+}
+
+.login-tagline {
+    color: var(--color-muted);
+    font-size: 0.88rem;
+    margin-bottom: 32px;
+}
+
+.login-input {
+    display: block;
+    width: 100%;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    background: var(--color-card);
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font-size: 0.95rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.12s;
+}
+
+.login-input:focus {
+    border-color: var(--color-accent);
+}
+
+.login-input::placeholder {
+    color: var(--color-muted);
+}
+
+.btn-signin {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    background: var(--color-accent);
+    color: #000;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.95rem;
+    font-weight: 700;
+    transition: opacity 0.12s;
+}
+
+.btn-signin:hover {
+    opacity: 0.88;
+}
