@@ -610,6 +610,287 @@ button {
 }
 
 /* =========================================================
+   Templates management page
+   ========================================================= */
+
+.templates-page {
+    padding: 24px 20px;
+    max-width: 680px;
+}
+
+.page-title {
+    font-size: 1.4rem;
+    font-weight: 800;
+    color: var(--color-text);
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+}
+
+.page-subtitle {
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    margin-bottom: 28px;
+}
+
+.section-heading {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-muted);
+    margin-bottom: 10px;
+}
+
+.add-template-section {
+    background: var(--color-surface);
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 24px;
+}
+
+.add-template-form {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ---- Shared input style for template forms ---- */
+
+.tr-input {
+    background: var(--color-card);
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font-family: var(--font);
+    font-size: 0.88rem;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.12s;
+    min-width: 0;
+}
+
+.tr-input:focus {
+    border-color: var(--color-accent);
+}
+
+.tr-input::placeholder {
+    color: var(--color-muted);
+}
+
+.tr-input-suffix {
+    flex: 1;
+    min-width: 160px;
+}
+
+.btn-add-template {
+    background: var(--color-accent);
+    border: none;
+    border-radius: var(--radius);
+    color: #000;
+    font-family: var(--font);
+    font-size: 0.88rem;
+    font-weight: 700;
+    padding: 8px 18px;
+    white-space: nowrap;
+    transition: opacity 0.12s;
+}
+
+.btn-add-template:hover {
+    opacity: 0.88;
+}
+
+.form-error {
+    margin-top: 8px;
+    padding: 7px 10px;
+    background: var(--color-card);
+    border-left: 3px solid var(--color-error);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    color: var(--color-error);
+    font-size: 0.82rem;
+}
+
+/* ---- Template list ---- */
+
+.template-list {
+    list-style: none;
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.4s ease;
+}
+
+.template-list.reorder-saved {
+    border-color: var(--color-accent);
+}
+
+.template-empty {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--color-muted);
+    font-size: 0.88rem;
+}
+
+/* ---- Template row ---- */
+
+.template-row {
+    border-bottom: 1px solid var(--color-card);
+    background: var(--color-surface);
+    transition: background 0.1s;
+}
+
+.template-row:last-child {
+    border-bottom: none;
+}
+
+.template-row.dragging {
+    opacity: 0.45;
+}
+
+.template-row.drag-over {
+    border-top: 2px solid var(--color-accent);
+    background: var(--color-card);
+}
+
+/* View state */
+
+.tr-view {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+}
+
+.drag-handle {
+    color: var(--color-muted);
+    font-size: 1rem;
+    cursor: grab;
+    flex-shrink: 0;
+    user-select: none;
+    letter-spacing: -3px;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.tr-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tr-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tr-suffix {
+    font-size: 0.8rem;
+    color: var(--color-accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tr-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Shared row button */
+
+.btn-tr {
+    background: none;
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius);
+    color: var(--color-muted);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.btn-tr:hover {
+    border-color: var(--color-text);
+    color: var(--color-text);
+}
+
+.btn-tr-save {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+.btn-tr-save:hover {
+    background: var(--color-accent);
+    color: #000;
+}
+
+.btn-tr-danger {
+    border-color: var(--color-error);
+    color: var(--color-error);
+}
+
+.btn-tr-danger:hover {
+    background: var(--color-error);
+    color: #000;
+}
+
+/* Edit state */
+
+.tr-edit {
+    padding: 12px 14px;
+}
+
+.tr-edit form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.tr-edit-fields {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.tr-edit-fields .tr-input:first-child {
+    width: 180px;
+}
+
+.tr-edit-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* Delete confirmation state */
+
+.tr-delete-confirm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--color-card);
+    flex-wrap: wrap;
+}
+
+.tr-confirm-label {
+    flex: 1;
+    font-size: 0.88rem;
+    color: var(--color-text);
+    font-weight: 500;
+}
+
+/* =========================================================
    Login page
    ========================================================= */
 

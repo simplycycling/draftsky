@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/rsherman/draftsky/internal/auth"
@@ -44,13 +46,20 @@ type LayoutData struct {
 	SentinelURL string   // next-page URL embedded in the scroll sentinel
 }
 
+// TemplatesPageData is the data envelope for the templates management page.
+type TemplatesPageData struct {
+	LayoutData
+	Templates []templateResponse
+}
+
 // UIHandler renders HTML pages.
 type UIHandler struct {
-	queries    *db.Queries
-	secret     []byte
-	feedClient *feed.Client
-	tmplHome   *template.Template
-	tmplLogin  *template.Template
+	queries       *db.Queries
+	secret        []byte
+	feedClient    *feed.Client
+	tmplHome      *template.Template
+	tmplTemplates *template.Template
+	tmplLogin     *template.Template
 }
 
 // NewUIHandler parses all page templates and returns a ready UIHandler.
@@ -121,16 +130,26 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmplTemplates, err := template.New("").Funcs(funcMap).ParseFiles(
+		"templates/layout.html",
+		"templates/partials/composer.html",
+		"templates/partials/template_row.html",
+		"templates/templates.html",
+	)
+	if err != nil {
+		return nil, err
+	}
 	tmplLogin, err := template.ParseFiles("templates/login.html")
 	if err != nil {
 		return nil, err
 	}
 	return &UIHandler{
-		queries:    queries,
-		secret:     secret,
-		feedClient: feedClient,
-		tmplHome:   tmplHome,
-		tmplLogin:  tmplLogin,
+		queries:       queries,
+		secret:        secret,
+		feedClient:    feedClient,
+		tmplHome:      tmplHome,
+		tmplTemplates: tmplTemplates,
+		tmplLogin:     tmplLogin,
 	}, nil
 }
 
@@ -163,29 +182,6 @@ func (h *UIHandler) HandleHome(c *gin.Context) {
 		return
 	}
 
-	tagRows, err := h.queries.GetRecentTagsByUser(
-		c.Request.Context(),
-		pgtype.Int4{Int32: user.ID, Valid: true},
-	)
-	if err != nil {
-		slog.Error("GetRecentTagsByUser", "user_id", user.ID, "err", err)
-	}
-	recentTags := make([]string, 0, len(tagRows))
-	for _, row := range tagRows {
-		recentTags = append(recentTags, row.Tag)
-	}
-
-	// Free users are locked to the ocean theme regardless of what is stored.
-	theme := user.Theme
-	if user.Plan == "free" && theme != "ocean" {
-		theme = "ocean"
-	}
-
-	handle := user.Handle.String
-	if !user.Handle.Valid || handle == "" {
-		handle = did
-	}
-
 	// Fetch first page of Following feed — non-fatal if unavailable.
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if fetchedPage, err := h.feedClient.GetFollowingFeed(
@@ -196,18 +192,10 @@ func (h *UIHandler) HandleHome(c *gin.Context) {
 		feedPage = fetchedPage
 	}
 
-	data := LayoutData{
-		User: PageUser{
-			DID:    did,
-			Handle: handle,
-			Plan:   user.Plan,
-		},
-		Theme:       theme,
-		RecentTags:  recentTags,
-		FeedPage:    feedPage,
-		FeedType:    "following",
-		SentinelURL: followingSentinelURL(feedPage.NextCursor),
-	}
+	data := h.buildLayoutBase(c, did, user)
+	data.FeedPage = feedPage
+	data.FeedType = "following"
+	data.SentinelURL = followingSentinelURL(feedPage.NextCursor)
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplHome.ExecuteTemplate(c.Writer, "layout", data); err != nil {
@@ -292,6 +280,186 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplHome.ExecuteTemplate(c.Writer, tmplName, data); err != nil {
 		slog.Error("render hashtag feed partial", "template", tmplName, "err", err)
+	}
+}
+
+// resolveUserForTemplates looks up the user row by DID and writes an error
+// response if it fails. Used by the template web handlers.
+func (h *UIHandler) resolveUserForTemplates(c *gin.Context, did string) (db.User, bool) {
+	user, err := h.queries.GetUserByDID(c.Request.Context(), did)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+		} else {
+			slog.Error("GetUserByDID", "did", did, "err", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		}
+		return db.User{}, false
+	}
+	return user, true
+}
+
+// buildLayoutBase populates the common LayoutData fields for a given user.
+func (h *UIHandler) buildLayoutBase(c *gin.Context, did string, user db.User) LayoutData {
+	tagRows, err := h.queries.GetRecentTagsByUser(
+		c.Request.Context(),
+		pgtype.Int4{Int32: user.ID, Valid: true},
+	)
+	if err != nil {
+		slog.Error("GetRecentTagsByUser", "user_id", user.ID, "err", err)
+	}
+	recentTags := make([]string, 0, len(tagRows))
+	for _, row := range tagRows {
+		recentTags = append(recentTags, row.Tag)
+	}
+
+	theme := user.Theme
+	if user.Plan == "free" && theme != "ocean" {
+		theme = "ocean"
+	}
+
+	handle := user.Handle.String
+	if !user.Handle.Valid || handle == "" {
+		handle = did
+	}
+
+	return LayoutData{
+		User: PageUser{
+			DID:    did,
+			Handle: handle,
+			Plan:   user.Plan,
+		},
+		Theme:      theme,
+		RecentTags: recentTags,
+	}
+}
+
+// HandleTemplatesPage renders the template management page.
+func (h *UIHandler) HandleTemplatesPage(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+
+	user, ok := h.resolveUserForTemplates(c, did)
+	if !ok {
+		return
+	}
+
+	rows, err := h.queries.ListTemplatesByUser(
+		c.Request.Context(),
+		pgtype.Int4{Int32: user.ID, Valid: true},
+	)
+	if err != nil {
+		slog.Error("ListTemplatesByUser in templates page", "user_id", user.ID, "err", err)
+		rows = nil
+	}
+
+	templates := make([]templateResponse, len(rows))
+	for i, t := range rows {
+		templates[i] = toResponse(t)
+	}
+
+	data := TemplatesPageData{
+		LayoutData: h.buildLayoutBase(c, did, user),
+		Templates:  templates,
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplTemplates.ExecuteTemplate(c.Writer, "layout", data); err != nil {
+		slog.Error("render templates page", "err", err)
+	}
+}
+
+// HandleWebCreateTemplate handles the HTMX form POST from the templates page.
+// Accepts application/x-www-form-urlencoded, returns the new template-row HTML
+// on success or JSON error on failure (so JS can read the error message).
+func (h *UIHandler) HandleWebCreateTemplate(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	suffix := strings.TrimSpace(c.PostForm("suffix"))
+	if name == "" || suffix == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name and suffix are required"})
+		return
+	}
+
+	user, ok := h.resolveUserForTemplates(c, did)
+	if !ok {
+		return
+	}
+
+	t, err := h.queries.CreateTemplate(c.Request.Context(), db.CreateTemplateParams{
+		UserID:   pgtype.Int4{Int32: user.ID, Valid: true},
+		Name:     name,
+		Suffix:   suffix,
+		Position: pgtype.Int4{Int32: 0, Valid: true},
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			c.JSON(http.StatusConflict, gin.H{"error": "a template with that name already exists"})
+			return
+		}
+		slog.Error("CreateTemplate (web)", "user_id", user.ID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create template"})
+		return
+	}
+
+	r := toResponse(t)
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Status(http.StatusCreated)
+	if err := h.tmplTemplates.ExecuteTemplate(c.Writer, "template-row", r); err != nil {
+		slog.Error("render template-row (create)", "err", err)
+	}
+}
+
+// HandleWebUpdateTemplate handles the HTMX form PUT from the template edit form.
+// Accepts application/x-www-form-urlencoded, returns the updated template-row HTML
+// on success or JSON error on failure.
+func (h *UIHandler) HandleWebUpdateTemplate(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+
+	idStr := c.Param("id")
+	id64, err := strconv.ParseInt(idStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template id"})
+		return
+	}
+	id := int32(id64)
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	suffix := strings.TrimSpace(c.PostForm("suffix"))
+	if name == "" || suffix == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name and suffix are required"})
+		return
+	}
+
+	user, ok := h.resolveUserForTemplates(c, did)
+	if !ok {
+		return
+	}
+
+	t, err := h.queries.UpdateTemplate(c.Request.Context(), db.UpdateTemplateParams{
+		ID:     id,
+		UserID: pgtype.Int4{Int32: user.ID, Valid: true},
+		Name:   name,
+		Suffix: suffix,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "template not found"})
+			return
+		}
+		if isUniqueViolation(err) {
+			c.JSON(http.StatusConflict, gin.H{"error": "a template with that name already exists"})
+			return
+		}
+		slog.Error("UpdateTemplate (web)", "id", id, "user_id", user.ID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update template"})
+		return
+	}
+
+	r := toResponse(t)
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplTemplates.ExecuteTemplate(c.Writer, "template-row", r); err != nil {
+		slog.Error("render template-row (update)", "err", err)
 	}
 }
 

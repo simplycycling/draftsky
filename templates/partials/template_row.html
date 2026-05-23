@@ -1,0 +1,52 @@
+{{define "template-row"}}
+<li class="template-row" data-id="{{.ID}}" draggable="true"
+    ondragstart="onDragStart(event)"
+    ondragover="onDragOver(event)"
+    ondrop="onDrop(event)"
+    ondragend="onDragEnd(event)">
+
+    <!-- View state (default) -->
+    <div class="tr-view" id="view-{{.ID}}">
+        <span class="drag-handle" title="Drag to reorder">&#8942;&#8942;</span>
+        <div class="tr-content">
+            <span class="tr-name">{{.Name}}</span>
+            <span class="tr-suffix">{{.Suffix}}</span>
+        </div>
+        <div class="tr-actions">
+            <button class="btn-tr btn-tr-edit" onclick="showEdit({{.ID}})">Edit</button>
+            <button class="btn-tr btn-tr-delete" onclick="showDeleteConfirm({{.ID}})">Delete</button>
+        </div>
+    </div>
+
+    <!-- Edit state (hidden) -->
+    <div class="tr-edit" id="edit-{{.ID}}" style="display:none">
+        <form hx-put="/templates/{{.ID}}"
+              hx-target="closest li"
+              hx-swap="outerHTML"
+              hx-on::after-request="onEditResponse(event, {{.ID}})">
+            <div class="tr-edit-fields">
+                <input class="tr-input" type="text" name="name" value="{{.Name}}"
+                       placeholder="Template name" required autocomplete="off">
+                <input class="tr-input tr-input-suffix" type="text" name="suffix" value="{{.Suffix}}"
+                       placeholder="#hashtags to append" required autocomplete="off">
+            </div>
+            <div class="tr-edit-actions">
+                <button type="submit" class="btn-tr btn-tr-save">Save</button>
+                <button type="button" class="btn-tr" onclick="cancelEdit({{.ID}})">Cancel</button>
+            </div>
+            <div id="edit-error-{{.ID}}" class="form-error" style="display:none"></div>
+        </form>
+    </div>
+
+    <!-- Delete confirmation (hidden) -->
+    <div class="tr-delete-confirm" id="delete-confirm-{{.ID}}" style="display:none">
+        <span class="tr-confirm-label">Delete &ldquo;{{.Name}}&rdquo;?</span>
+        <button class="btn-tr btn-tr-danger"
+                hx-delete="/api/templates/{{.ID}}"
+                hx-target="closest li"
+                hx-swap="delete">Yes, delete</button>
+        <button class="btn-tr" type="button" onclick="cancelDeleteConfirm({{.ID}})">No, keep it</button>
+    </div>
+
+</li>
+{{end}}

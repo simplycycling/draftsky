@@ -1,0 +1,43 @@
+{{define "content"}}
+<div class="templates-page">
+
+    <div class="templates-header">
+        <h1 class="page-title">Templates</h1>
+        <p class="page-subtitle">Saved hashtag sets appended to your posts.</p>
+    </div>
+
+    <!-- Add Template form -->
+    <div class="add-template-section">
+        <h2 class="section-heading">Add Template</h2>
+        <form id="add-template-form"
+              class="add-template-form"
+              hx-post="/templates"
+              hx-target="#template-list"
+              hx-swap="beforeend"
+              hx-on::after-request="onAddTemplateResponse(event)">
+            <input class="tr-input" type="text" name="name"
+                   placeholder="Name, e.g. Devils Game"
+                   required autocomplete="off" maxlength="100">
+            <input class="tr-input tr-input-suffix" type="text" name="suffix"
+                   placeholder="Suffix, e.g. #NJDevils #NHL"
+                   required autocomplete="off" maxlength="280">
+            <button type="submit" class="btn-add-template">Add</button>
+        </form>
+        <div id="add-template-error" class="form-error" style="display:none"></div>
+    </div>
+
+    <!-- Template list -->
+    <ul id="template-list" class="template-list">
+        {{if .Templates}}
+        {{range .Templates}}
+        {{template "template-row" .}}
+        {{end}}
+        {{else}}
+        <li id="empty-state" class="template-empty">
+            No templates yet. Add one above.
+        </li>
+        {{end}}
+    </ul>
+
+</div>
+{{end}}

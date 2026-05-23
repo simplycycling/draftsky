@@ -127,6 +127,9 @@ func main() {
 	web.GET("", uiH.HandleHome)
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
+	web.GET("/templates", uiH.HandleTemplatesPage)
+	web.POST("/templates", uiH.HandleWebCreateTemplate)
+	web.PUT("/templates/:id", uiH.HandleWebUpdateTemplate)
 
 	// Protected route group — all routes added here require a valid session cookie.
 	api := r.Group("/api", middleware.RequireAuth(secret))
