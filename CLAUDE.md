@@ -231,6 +231,18 @@ drafsky/
 - The `did` column is the user identifier in all foreign key relationships, not `handle`
 - Pending migrations before UI work: `000004_create_post_history`, `000005_add_theme_to_users`
 
+**Known issues to fix in Session 8 (warm-up):**
+- Avatar not displaying in left rail — the `users` table has no `avatar` column. Fetch
+  the avatar URL from `app.bsky.actor.getProfile` in `HandleCallback` at login time and
+  store it on the user record. Add migration `000006_add_avatar_to_users.up.sql`:
+  `ALTER TABLE users ADD COLUMN avatar TEXT`. Pass it through `LayoutData` to the template.
+- Recent tags not populating — `post_history` did not exist when Session 5 ran, so
+  `HandleCreatePost` is not writing to it. Add the insert to `HandleCreatePost` after a
+  successful Bluesky post: extract hashtags from the combined text (reuse the regex from
+  `internal/bluesky/bluesky.go`), insert a `post_history` row with the URI and hashtags
+  array. Add a `CreatePostHistory` query to `internal/db/queries/users.sql` and
+  regenerate sqlc.
+
 ### AT Protocol / Bluesky
 - Always use the indigo library for post construction — never build `app.bsky.feed.post`
   records manually
