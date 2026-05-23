@@ -115,7 +115,7 @@ func main() {
 	r.POST("/auth/logout", authHandler.HandleLogout)
 
 	// Login page (redirects to / if already authenticated)
-	uiH, err := handlers.NewUIHandler(queries, secret)
+	uiH, err := handlers.NewUIHandler(queries, secret, feedClient)
 	if err != nil {
 		slog.Error("failed to parse templates", "err", err)
 		os.Exit(1)
@@ -125,6 +125,8 @@ func main() {
 	// Authenticated web UI routes
 	web := r.Group("/", middleware.RequireSession(secret))
 	web.GET("", uiH.HandleHome)
+	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
+	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
 
 	// Protected route group — all routes added here require a valid session cookie.
 	api := r.Group("/api", middleware.RequireAuth(secret))

@@ -1,0 +1,58 @@
+{{define "feed"}}
+{{template "feed-controls" .}}
+{{if .FeedPage}}
+{{if .FeedPage.Posts}}
+<ul id="post-list" class="post-list">
+    {{template "feed-more" .}}
+</ul>
+{{else}}
+<div class="feed-empty">
+    <p class="muted-text">No posts yet. Follow some accounts to see their posts here.</p>
+</div>
+{{end}}
+{{else}}
+<div class="feed-empty">
+    <p class="muted-text">Feed unavailable. Please try again.</p>
+</div>
+{{end}}
+{{end}}
+
+{{define "feed-more"}}
+{{range .FeedPage.Posts}}
+<li class="post-card">
+    <div class="post-header">
+        <div class="post-author">
+            {{if .Author.Avatar}}
+            <img class="post-author-avatar" src="{{derefStr .Author.Avatar}}" alt="" loading="lazy">
+            {{else}}
+            <div class="post-author-avatar post-author-initials">{{initials .Author.DisplayName .Author.Handle}}</div>
+            {{end}}
+            <div class="post-author-info">
+                {{if .Author.DisplayName}}
+                <span class="post-author-name">{{.Author.DisplayName}}</span>
+                {{end}}
+                <span class="post-author-handle">@{{.Author.Handle}}</span>
+            </div>
+        </div>
+        <span class="post-timestamp">{{relativeTime .IndexedAt}}</span>
+    </div>
+    <div class="post-body">
+        <p class="post-text">{{highlightHashtags .Text}}</p>
+    </div>
+    <div class="post-meta">
+        {{if .ReplyCount}}<span class="post-count post-count-reply">{{formatCount .ReplyCount}}</span>{{end}}
+        {{if .RepostCount}}<span class="post-count post-count-repost">{{formatCount .RepostCount}}</span>{{end}}
+        {{if .LikeCount}}<span class="post-count post-count-like">{{formatCount .LikeCount}}</span>{{end}}
+    </div>
+</li>
+{{end}}
+{{if .SentinelURL}}
+<li id="feed-sentinel" class="feed-sentinel"
+    hx-get="{{.SentinelURL}}"
+    hx-trigger="revealed"
+    hx-target="#feed-sentinel"
+    hx-swap="outerHTML">
+    <div class="feed-loading">Loading more&hellip;</div>
+</li>
+{{end}}
+{{end}}

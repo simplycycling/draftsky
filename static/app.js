@@ -141,3 +141,14 @@ document.addEventListener('keydown', e => {
         if (overlay && overlay.style.display !== 'none') closeComposer();
     }
 });
+
+// --- Feed switching ---
+
+document.body.addEventListener('postSubmitted', function(evt) {
+    const { hashtags } = evt.detail;
+    let feedURL = '/feed/following';
+    if (hashtags && hashtags.length > 0) {
+        feedURL = '/feed/hashtags?tags=' + hashtags.map(encodeURIComponent).join(',');
+    }
+    htmx.ajax('GET', feedURL, { target: '#feed-root', swap: 'innerHTML' });
+});

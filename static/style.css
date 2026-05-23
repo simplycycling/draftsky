@@ -258,6 +258,198 @@ button {
 }
 
 /* =========================================================
+   Feed controls bar
+   ========================================================= */
+
+.feed-controls {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-card);
+    position: sticky;
+    top: 0;
+    background: var(--color-bg);
+    z-index: 10;
+}
+
+.feed-controls-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.feed-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.feed-active-tag {
+    color: var(--color-accent);
+}
+
+.btn-back {
+    background: none;
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius-full);
+    color: var(--color-muted);
+    font-family: var(--font);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 4px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.12s, color 0.12s;
+}
+
+.btn-back:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+/* =========================================================
+   Post list + post cards
+   ========================================================= */
+
+.post-list {
+    list-style: none;
+}
+
+.post-card {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--color-card);
+    transition: background 0.1s;
+}
+
+.post-card:hover {
+    background: var(--color-surface);
+}
+
+.post-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.post-author {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.post-author-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--color-card);
+}
+
+.post-author-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+
+.post-author-info {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.post-author-name {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.post-author-handle {
+    font-size: 0.8rem;
+    color: var(--color-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.post-timestamp {
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.post-body {
+    margin-left: 46px;
+    margin-bottom: 8px;
+}
+
+.post-text {
+    font-size: 0.93rem;
+    line-height: 1.55;
+    color: var(--color-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.post-hashtag {
+    color: var(--color-accent);
+    font-weight: 500;
+}
+
+.post-meta {
+    margin-left: 46px;
+    display: flex;
+    gap: 16px;
+}
+
+.post-count {
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    font-weight: 500;
+}
+
+.post-count::before {
+    margin-right: 3px;
+}
+
+.post-count-reply::before  { content: '↩'; }
+.post-count-repost::before { content: '↻'; }
+.post-count-like::before   { content: '♡'; }
+
+/* =========================================================
+   Feed states
+   ========================================================= */
+
+.feed-empty {
+    padding: 48px 16px;
+    text-align: center;
+}
+
+.feed-sentinel {
+    list-style: none;
+}
+
+.feed-loading {
+    padding: 24px;
+    text-align: center;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+}
+
+/* =========================================================
    Composer modal
    ========================================================= */
 
