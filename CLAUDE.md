@@ -118,7 +118,16 @@ CREATE TABLE users (
     refresh_token TEXT,
     token_expiry  TIMESTAMPTZ,
     plan          TEXT NOT NULL DEFAULT 'free', -- 'free' | 'paid'; set to 'paid' on verified IAP
+    theme         TEXT NOT NULL DEFAULT 'ocean', -- see Themes section; paid users only for non-default
     created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE post_history (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    uri        TEXT NOT NULL,              -- AT URI of the submitted post
+    hashtags   TEXT[] NOT NULL,            -- extracted at post time
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE templates (
@@ -162,13 +171,14 @@ CREATE TABLE templates (
 |--------|-----------------------|----------------------------------------------------|
 | GET    | /api/feed/following   | User's Following feed (cursor-paginated)           |
 | GET    | /api/feed/hashtags    | Merged hashtag feed; accepts `tags` query param    |
+| GET    | /api/feed/recent-tags | Last 10 unique hashtags posted by the user         |
 
 ### Web UI (HTMX)
 | Method | Path           | Description                                          |
 |--------|----------------|------------------------------------------------------|
 | GET    | /              | Composer + template selector + feed                  |
 | GET    | /templates     | Template management page                             |
-| GET    | /settings      | Account settings                                     |
+| GET    | /settings      | Account settings (includes theme selector for paid)  |
 
 ---
 
@@ -182,6 +192,7 @@ drafsky/
 ├── internal/
 │   ├── auth/          # AT Protocol OAuth handlers and token management
 │   ├── bluesky/       # indigo client wrapper, post construction, facets
+│   ├── feed/          # Following and hashtag feed clients
 │   ├── db/
 │   │   ├── queries/   # .sql files (sqlc source)
 │   │   └── sqlc/      # generated Go code (do not edit manually)
@@ -218,6 +229,7 @@ drafsky/
 - Always use parameterised queries (sqlc enforces this)
 - Migrations are sequential and never edited after creation — add a new migration to fix mistakes
 - The `did` column is the user identifier in all foreign key relationships, not `handle`
+- Pending migrations before UI work: `000004_create_post_history`, `000005_add_theme_to_users`
 
 ### AT Protocol / Bluesky
 - Always use the indigo library for post construction — never build `app.bsky.feed.post`
@@ -268,13 +280,89 @@ sqlc (CLI tool — see https://sqlc.dev)
 
 ---
 
+## UI Design
+
+### Layout
+Three-column layout matching the Bluesky/Twitter convention:
+
+```
+┌──────────────┬─────────────────────┬──────────────┐
+│   Left Rail  │     Centre Feed     │  Right Rail  │
+│              │                     │              │
+│  Avatar      │  [post cards]       │ Recent Tags  │
+│  Handle      │                     │ #NJDevils    │
+│  Home        │                     │ #NHL         │
+│  Templates   │                     │ #motosky     │
+│  Settings    │                     │ ...          │
+│  Logout      │                     │              │
+│              │                     │              │
+│  [New Post]  │                     │              │
+└──────────────┴─────────────────────┴──────────────┘
+```
+
+- **Left rail:** Avatar, handle, nav links, New Post button at the bottom of the nav
+- **Centre feed:** Following feed on load; switches to merged hashtag feed after posting
+- **Right rail:** Last 10 unique hashtags the authenticated user has personally posted,
+  pulled from `post_history`, ordered by most recently used. Fewer than 10 shown if the
+  user hasn't posted 10 distinct hashtags yet.
+
+### Composer (modal/popup)
+Triggered by the New Post button. Modelled on the Bluesky compose modal:
+- User avatar top-left
+- Text area with placeholder
+- Template selector dropdown (replaces the "Anyone can interact" area from Bluesky)
+- Character counter (300 limit)
+- Post button top-right
+- Cancel top-left
+
+### Colour Palette — Deep Ocean
+
+| Role         | Hex       | Usage                                      |
+|--------------|-----------|--------------------------------------------|
+| Background   | `#070d1a` | Page background                            |
+| Surface      | `#0d1829` | Left rail, right rail, card backgrounds    |
+| Card         | `#132038` | Post cards, modal background               |
+| Accent       | `#34d399` | Hashtags, active nav, buttons, links       |
+| Text         | `#dbeafe` | Primary text                               |
+| Muted        | `#4b6080` | Secondary text, timestamps, labels         |
+
+CSS variables must be used throughout — never hardcode hex values in component styles.
+Define all colours in a `:root {}` block in `/static/style.css`.
+
+### Themes
+
+Themes are sets of CSS variable overrides. The user's theme is injected as a class on
+the `<body>` tag by the Go template, based on the `theme` column in the `users` table.
+Free users are locked to `ocean`. Paid users can select any theme from their settings.
+
+| Theme key  | Name              | Plan     | Accent    | Base                    |
+|------------|-------------------|----------|-----------|-------------------------|
+| `ocean`    | Deep Ocean        | Free     | `#34d399` | `#070d1a` / `#0d1829`  |
+| `slate`    | Midnight Slate    | Paid     | `#7c9ef8` | `#0f1117` / `#181c27`  |
+| `amber`    | Charcoal & Amber  | Paid     | `#f59e0b` | `#111111` / `#1a1a1a`  |
+| `graphite` | Graphite & Sky    | Paid     | `#38bdf8` | `#131416` / `#1c1f23`  |
+
+**Implementation rules:**
+- `/static/style.css` defines `:root` with the `ocean` defaults
+- Each paid theme is a `body.slate { }`, `body.amber { }`, `body.graphite { }` block
+  that overrides only the CSS variables that differ
+- The base Go layout template sets `<body class="{{ .User.Theme }}">`
+- A free user whose `theme` column is somehow set to a paid theme must fall back to
+  `ocean` — enforce this in the template data layer, not in CSS
+- Adding a new theme in future requires only a new CSS block and a new row in this table
+
+### Typography
+System font stack — no external font dependencies for v1.
+
+---
+
 ## Monetisation
 
 DraftSky uses a freemium model on web and an ad-supported + one-time purchase model on iOS.
 
 **Web (future):**
-- Free tier: up to 5 templates, Following feed, basic posting
-- Paid tier: unlimited templates, tabbed hashtag feed (Phase 2), future features
+- Free tier: up to 5 templates, Following feed, basic posting, Ocean theme only
+- Paid tier: unlimited templates, tabbed hashtag feed (Phase 2), all themes
 - Enforced via the `plan` column on the `users` table
 
 **iOS (Phase 3):**
