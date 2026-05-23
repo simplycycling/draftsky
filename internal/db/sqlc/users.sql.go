@@ -12,7 +12,7 @@ import (
 )
 
 const getUserByDID = `-- name: GetUserByDID :one
-SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at FROM users WHERE did = $1
+SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan FROM users WHERE did = $1
 `
 
 func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
@@ -26,6 +26,7 @@ func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
 		&i.RefreshToken,
 		&i.TokenExpiry,
 		&i.CreatedAt,
+		&i.Plan,
 	)
 	return i, err
 }
@@ -36,7 +37,7 @@ SET access_token  = $2,
     refresh_token = $3,
     token_expiry  = $4
 WHERE did = $1
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan
 `
 
 type UpdateUserTokensParams struct {
@@ -62,6 +63,7 @@ func (q *Queries) UpdateUserTokens(ctx context.Context, arg UpdateUserTokensPara
 		&i.RefreshToken,
 		&i.TokenExpiry,
 		&i.CreatedAt,
+		&i.Plan,
 	)
 	return i, err
 }
@@ -74,7 +76,7 @@ ON CONFLICT (did) DO UPDATE SET
     access_token  = EXCLUDED.access_token,
     refresh_token = EXCLUDED.refresh_token,
     token_expiry  = EXCLUDED.token_expiry
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan
 `
 
 type UpsertUserParams struct {
@@ -102,6 +104,7 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.RefreshToken,
 		&i.TokenExpiry,
 		&i.CreatedAt,
+		&i.Plan,
 	)
 	return i, err
 }

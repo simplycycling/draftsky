@@ -11,7 +11,8 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/rsherman/draftsky/internal/auth"
-	"github.com/rsherman/draftsky/internal/db/sqlc"
+	"github.com/rsherman/draftsky/internal/bluesky"
+	db "github.com/rsherman/draftsky/internal/db/sqlc"
 	"github.com/rsherman/draftsky/internal/handlers"
 	"github.com/rsherman/draftsky/internal/middleware"
 )
@@ -89,6 +90,7 @@ func main() {
 	// (DPoP keys, nonces) is lost on restart. A PostgreSQL-backed store
 	// will replace this in Phase 2.
 	oauthApp := oauth.NewClientApp(&oauthConfig, oauth.NewMemStore())
+	poster := bluesky.New(oauthApp)
 
 	// --- HTTP server ---
 	r := gin.New()
@@ -118,6 +120,9 @@ func main() {
 	api.POST("/templates", templateH.HandleCreateTemplate)
 	api.PUT("/templates/:id", templateH.HandleUpdateTemplate)
 	api.DELETE("/templates/:id", templateH.HandleDeleteTemplate)
+
+	postH := handlers.NewPostHandler(queries, poster)
+	api.POST("/post", postH.HandleCreatePost)
 
 	slog.Info("starting server", "port", port, "env", appEnv)
 	if err := r.Run(":" + port); err != nil {

@@ -12,6 +12,10 @@ import (
 // is stored by RequireAuth. Handlers retrieve it with c.GetString(middleware.ContextKeyDID).
 const ContextKeyDID = "user_did"
 
+// ContextKeySessionID is the Gin context key under which the OAuth session ID
+// is stored by RequireAuth. Required for resuming the OAuth session to make API calls.
+const ContextKeySessionID = "user_session_id"
+
 // RequireAuth validates the signed session cookie and injects the user's DID
 // into the Gin context. Returns 401 for missing or invalid sessions.
 func RequireAuth(secret []byte) gin.HandlerFunc {
@@ -22,13 +26,14 @@ func RequireAuth(secret []byte) gin.HandlerFunc {
 			return
 		}
 
-		did, _, err := auth.ParseSessionCookie(cookie.Value, secret)
+		did, sessionID, err := auth.ParseSessionCookie(cookie.Value, secret)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid session"})
 			return
 		}
 
 		c.Set(ContextKeyDID, did)
+		c.Set(ContextKeySessionID, sessionID)
 		c.Next()
 	}
 }

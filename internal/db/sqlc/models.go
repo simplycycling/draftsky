@@ -25,4 +25,5 @@ type User struct {
 	RefreshToken pgtype.Text
 	TokenExpiry  pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
+	Plan         string
 }
