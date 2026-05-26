@@ -38,15 +38,17 @@ type unlikeRequest struct {
 }
 
 // HandleCreateLike creates a like record for a post and returns an updated like-button fragment.
+// HTMX sends hx-post as application/x-www-form-urlencoded, so we read form fields directly.
 func (h *LikeHandler) HandleCreateLike(c *gin.Context) {
 	did := c.GetString(middleware.ContextKeyDID)
 	sessionID := c.GetString(middleware.ContextKeySessionID)
 
-	var req likeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	uri := c.PostForm("uri")
+	if uri == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "uri is required"})
 		return
 	}
+	req := likeRequest{URI: uri, CID: c.PostForm("cid")}
 
 	parsedDID, err := syntax.ParseDID(did)
 	if err != nil {
@@ -83,14 +85,30 @@ func (h *LikeHandler) HandleCreateLike(c *gin.Context) {
 }
 
 // HandleDeleteLike removes a like record and returns an updated like-button fragment.
+// HTMX may send hx-delete params in the body (form-encoded) or as query params depending
+// on version; we check both.
 func (h *LikeHandler) HandleDeleteLike(c *gin.Context) {
 	did := c.GetString(middleware.ContextKeyDID)
 	sessionID := c.GetString(middleware.ContextKeySessionID)
 
-	var req unlikeRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	// Like URI to delete — from body or query string.
+	likeURI := c.PostForm("uri")
+	if likeURI == "" {
+		likeURI = c.Query("uri")
+	}
+	if likeURI == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "uri is required"})
 		return
+	}
+
+	// Post URI + CID so the returned button can re-like the post.
+	postURI := c.PostForm("post_uri")
+	if postURI == "" {
+		postURI = c.Query("post_uri")
+	}
+	postCID := c.PostForm("post_cid")
+	if postCID == "" {
+		postCID = c.Query("post_cid")
 	}
 
 	parsedDID, err := syntax.ParseDID(did)
@@ -106,7 +124,7 @@ func (h *LikeHandler) HandleDeleteLike(c *gin.Context) {
 		return
 	}
 
-	rkey := rkeyFromURI(req.URI)
+	rkey := rkeyFromURI(likeURI)
 	if rkey == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid like URI"})
 		return
@@ -122,7 +140,8 @@ func (h *LikeHandler) HandleDeleteLike(c *gin.Context) {
 		return
 	}
 
-	pv := feed.PostView{LikedByMe: false}
+	// Return a "like" button (not liked) referencing the original post so the user can re-like.
+	pv := feed.PostView{LikedByMe: false, URI: postURI, CID: postCID}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	renderLikeButton(c, pv)
 }
@@ -147,7 +166,8 @@ func renderLikeButton(c *gin.Context, pv feed.PostView) {
 		heart = "♥"
 		action = "Unlike"
 		hxMethod = `hx-delete="/api/like"`
-		hxVals = fmt.Sprintf(`hx-vals='{"uri": %q}'`, pv.LikeURI)
+		// Include post_uri and post_cid so the unlike handler can build a working re-like button.
+		hxVals = fmt.Sprintf(`hx-vals='{"uri": %q, "post_uri": %q, "post_cid": %q}'`, pv.LikeURI, pv.URI, pv.CID)
 	}
 	likedClass := ""
 	if pv.LikedByMe {

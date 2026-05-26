@@ -28,6 +28,14 @@ type PostImage struct {
 	Alt      string `json:"alt"`
 }
 
+// PostExternalLink is an external URL card attached to a post (app.bsky.embed.external#view).
+type PostExternalLink struct {
+	URI         string `json:"uri"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Thumb       string `json:"thumb,omitempty"`
+}
+
 // PostView is the clean JSON representation of a single post in a feed.
 // No indigo types leak out of this struct.
 type PostView struct {
@@ -39,9 +47,10 @@ type PostView struct {
 	LikeCount   int64       `json:"like_count"`
 	RepostCount int64       `json:"repost_count"`
 	ReplyCount  int64       `json:"reply_count"`
-	LikedByMe   bool        `json:"liked_by_me"`
-	LikeURI     string      `json:"like_uri,omitempty"`
-	Images      []PostImage `json:"images,omitempty"`
+	LikedByMe    bool              `json:"liked_by_me"`
+	LikeURI      string            `json:"like_uri,omitempty"`
+	Images       []PostImage       `json:"images,omitempty"`
+	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
 }
 
 // FeedPage is a page of posts with an optional cursor for the next page.
@@ -259,15 +268,28 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 		v.LikeURI = *pv.Viewer.Like
 	}
 
-	if pv.Embed != nil && pv.Embed.EmbedImages_View != nil {
-		for _, img := range pv.Embed.EmbedImages_View.Images {
-			if img != nil {
-				v.Images = append(v.Images, PostImage{
-					Thumb:    img.Thumb,
-					Fullsize: img.Fullsize,
-					Alt:      img.Alt,
-				})
+	if pv.Embed != nil {
+		if pv.Embed.EmbedImages_View != nil {
+			for _, img := range pv.Embed.EmbedImages_View.Images {
+				if img != nil {
+					v.Images = append(v.Images, PostImage{
+						Thumb:    img.Thumb,
+						Fullsize: img.Fullsize,
+						Alt:      img.Alt,
+					})
+				}
 			}
+		}
+		if ext := pv.Embed.EmbedExternal_View; ext != nil && ext.External != nil {
+			el := &PostExternalLink{
+				URI:         ext.External.Uri,
+				Title:       ext.External.Title,
+				Description: ext.External.Description,
+			}
+			if ext.External.Thumb != nil {
+				el.Thumb = *ext.External.Thumb
+			}
+			v.ExternalLink = el
 		}
 	}
 

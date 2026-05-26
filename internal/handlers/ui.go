@@ -70,13 +70,22 @@ type UIHandler struct {
 func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (*UIHandler, error) {
 	funcMap := template.FuncMap{
 		// highlightHashtags wraps hashtag tokens in a styled span.
-		// The input is HTML-escaped first so user content cannot inject markup.
+		// Runs the regex on plain text so that apostrophes and other punctuation
+		// are detected correctly, then escapes each segment exactly once before
+		// assembling the result. Returning template.HTML tells html/template not
+		// to apply a second round of escaping.
 		"highlightHashtags": func(text string) template.HTML {
-			escaped := template.HTMLEscapeString(text)
-			result := uiHashtagRe.ReplaceAllStringFunc(escaped, func(m string) string {
-				return `<span class="post-hashtag">` + m + `</span>`
-			})
-			return template.HTML(result)
+			var buf strings.Builder
+			last := 0
+			for _, m := range uiHashtagRe.FindAllStringIndex(text, -1) {
+				buf.WriteString(template.HTMLEscapeString(text[last:m[0]]))
+				buf.WriteString(`<span class="post-hashtag">`)
+				buf.WriteString(template.HTMLEscapeString(text[m[0]:m[1]]))
+				buf.WriteString(`</span>`)
+				last = m[1]
+			}
+			buf.WriteString(template.HTMLEscapeString(text[last:]))
+			return template.HTML(buf.String())
 		},
 		// relativeTime converts an RFC3339 timestamp to a human-readable age.
 		"relativeTime": func(indexedAt string) string {

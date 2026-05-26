@@ -5,7 +5,7 @@
       hx-swap="outerHTML"
       {{if .LikedByMe}}
       hx-delete="/api/like"
-      hx-vals='{"uri": "{{.LikeURI}}"}'
+      hx-vals='{"uri": "{{.LikeURI}}", "post_uri": "{{.URI}}", "post_cid": "{{.CID}}"}'
       {{else}}
       hx-post="/api/like"
       hx-vals='{"uri": "{{.URI}}", "cid": "{{.CID}}"}'
@@ -63,6 +63,18 @@
             </a>
             {{end}}
         </div>
+        {{end}}
+        {{if .ExternalLink}}
+        <a href="{{.ExternalLink.URI}}" target="_blank" rel="noopener noreferrer" class="link-card">
+            {{if .ExternalLink.Thumb}}
+            <img class="link-card-thumb" src="{{.ExternalLink.Thumb}}" alt="" loading="lazy">
+            {{end}}
+            <div class="link-card-body">
+                {{if .ExternalLink.Title}}<p class="link-card-title">{{.ExternalLink.Title}}</p>{{end}}
+                {{if .ExternalLink.Description}}<p class="link-card-desc">{{.ExternalLink.Description}}</p>{{end}}
+                <p class="link-card-url">{{.ExternalLink.URI}}</p>
+            </div>
+        </a>
         {{end}}
     </div>
     <div class="post-meta">
