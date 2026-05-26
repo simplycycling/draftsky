@@ -243,6 +243,17 @@ drafsky/
   array. Add a `CreatePostHistory` query to `internal/db/queries/users.sql` and
   regenerate sqlc.
 
+**Beta release additions — also Session 8 scope:**
+- **Likes** — add a like/unlike toggle to each post card. `app.bsky.feed.like` record
+  creation via indigo. New endpoints: `POST /api/like` (create like) and
+  `DELETE /api/like` (remove like), both accepting `{uri, cid}`. The feed `PostView`
+  needs `LikedByMe bool` and `LikeURI string` fields so the toggle can reflect current
+  state and send the right request.
+- **Image display** — add to `PostView` in `internal/feed/feed.go`:
+  Images []PostImage with Thumb, Fullsize, Alt string fields.
+  Populate from app.bsky.embed.images#view in the feed mapping logic. Render images
+  in the feed template below post text, capped to card width, respecting aspect ratio.
+
 ### AT Protocol / Bluesky
 - Always use the indigo library for post construction — never build `app.bsky.feed.post`
   records manually
@@ -274,9 +285,10 @@ PORT                HTTP listen port (default 8080)
 | Phase | Scope                                                                               |
 |-------|-------------------------------------------------------------------------------------|
 | 1     | Core API + AT Protocol OAuth + Go/HTMX web UI + Following feed + merged hashtag feed |
-| 2     | Harden for public release: rate limiting, token refresh, error UX; add per-hashtag tabbed feed toggle |
-| 3     | SwiftUI iOS app (same /api/* endpoints)                                             |
-| 4     | Polish: template sharing, starter template packs                                    |
+| 2 (Beta) | Hardening + likes + image display in feed. Beta release to friends.            |
+| 3 (General release) | Replies (with correct AT Protocol threading) + reposts + tabbed hashtag feed toggle |
+| 4     | SwiftUI iOS app (same /api/* endpoints)                                             |
+| 5     | Photo posting (blob upload), template sharing, starter template packs               |
 
 ---
 
@@ -398,5 +410,28 @@ should be added at that point, following the same pattern as `RequireAuth`.
 - Multi-platform support (Mastodon, Threads etc.) — Bluesky only
 - Scheduling posts
 - Analytics or engagement tracking
-- Team/shared template libraries (Phase 4 consideration)
+- Team/shared template libraries (Phase 5 consideration)
 - Dark mode (add later — ship first)
+- Photo posting (Phase 5 — requires blob upload via `com.atproto.repo.uploadBlob`)
+
+## Roadmap
+
+### Beta release — Session 8 scope additions
+Beyond hardening, Session 8 adds:
+- **Likes** — `app.bsky.feed.like` record creation. Single API call, like/unlike toggle
+  on each post card in the feed.
+- **Image display** — `PostView` needs an `Embed` field to capture image URLs from
+  `app.bsky.feed.defs#imageView`. Feed template renders attached images below post text.
+  Respect aspect ratios; cap display width to the card width.
+
+### General release additions
+- **Replies** — reply mode in the composer. AT Protocol requires both `reply.root` and
+  `reply.parent` references to be set correctly on the post record. The root is the
+  original post in the thread; the parent is the post being directly replied to. Both
+  are `{uri, cid}` pairs. The composer needs a reply context state (triggered by clicking
+  Reply on a post card) that passes these references through to `HandleCreatePost`.
+- **Reposts** — `app.bsky.feed.repost` record. Simple toggle like likes.
+
+### Phase 4 — iOS app
+SwiftUI app consuming the same `/api/*` endpoints. All features available on web
+should be available on iOS at parity.
