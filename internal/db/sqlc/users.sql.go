@@ -11,6 +11,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createPostHistory = `-- name: CreatePostHistory :one
+INSERT INTO post_history (user_id, uri, hashtags)
+VALUES ($1, $2, $3)
+RETURNING id, user_id, uri, hashtags, created_at
+`
+
+type CreatePostHistoryParams struct {
+	UserID   pgtype.Int4
+	Uri      string
+	Hashtags []string
+}
+
+func (q *Queries) CreatePostHistory(ctx context.Context, arg CreatePostHistoryParams) (PostHistory, error) {
+	row := q.db.QueryRow(ctx, createPostHistory, arg.UserID, arg.Uri, arg.Hashtags)
+	var i PostHistory
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Uri,
+		&i.Hashtags,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getRecentTagsByUser = `-- name: GetRecentTagsByUser :many
 SELECT tag::text AS tag, MAX(ph.created_at) AS last_used
 FROM post_history ph, unnest(ph.hashtags) AS tag
@@ -46,7 +71,7 @@ func (q *Queries) GetRecentTagsByUser(ctx context.Context, userID pgtype.Int4) (
 }
 
 const getUserByDID = `-- name: GetUserByDID :one
-SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme FROM users WHERE did = $1
+SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar FROM users WHERE did = $1
 `
 
 func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
@@ -62,8 +87,23 @@ func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
 		&i.CreatedAt,
 		&i.Plan,
 		&i.Theme,
+		&i.Avatar,
 	)
 	return i, err
+}
+
+const updateUserAvatar = `-- name: UpdateUserAvatar :exec
+UPDATE users SET avatar = $2 WHERE did = $1
+`
+
+type UpdateUserAvatarParams struct {
+	Did    string
+	Avatar pgtype.Text
+}
+
+func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarParams) error {
+	_, err := q.db.Exec(ctx, updateUserAvatar, arg.Did, arg.Avatar)
+	return err
 }
 
 const updateUserTokens = `-- name: UpdateUserTokens :one
@@ -72,7 +112,7 @@ SET access_token  = $2,
     refresh_token = $3,
     token_expiry  = $4
 WHERE did = $1
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar
 `
 
 type UpdateUserTokensParams struct {
@@ -100,6 +140,7 @@ func (q *Queries) UpdateUserTokens(ctx context.Context, arg UpdateUserTokensPara
 		&i.CreatedAt,
 		&i.Plan,
 		&i.Theme,
+		&i.Avatar,
 	)
 	return i, err
 }
@@ -112,7 +153,7 @@ ON CONFLICT (did) DO UPDATE SET
     access_token  = EXCLUDED.access_token,
     refresh_token = EXCLUDED.refresh_token,
     token_expiry  = EXCLUDED.token_expiry
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar
 `
 
 type UpsertUserParams struct {
@@ -142,6 +183,7 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.CreatedAt,
 		&i.Plan,
 		&i.Theme,
+		&i.Avatar,
 	)
 	return i, err
 }

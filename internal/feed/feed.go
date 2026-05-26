@@ -21,17 +21,27 @@ type PostAuthor struct {
 	Avatar      *string `json:"avatar,omitempty"`
 }
 
+// PostImage is a single image attached to a post.
+type PostImage struct {
+	Thumb    string `json:"thumb"`
+	Fullsize string `json:"fullsize"`
+	Alt      string `json:"alt"`
+}
+
 // PostView is the clean JSON representation of a single post in a feed.
 // No indigo types leak out of this struct.
 type PostView struct {
-	URI         string     `json:"uri"`
-	CID         string     `json:"cid"`
-	Author      PostAuthor `json:"author"`
-	Text        string     `json:"text"`
-	IndexedAt   string     `json:"indexed_at"`
-	LikeCount   int64      `json:"like_count"`
-	RepostCount int64      `json:"repost_count"`
-	ReplyCount  int64      `json:"reply_count"`
+	URI         string      `json:"uri"`
+	CID         string      `json:"cid"`
+	Author      PostAuthor  `json:"author"`
+	Text        string      `json:"text"`
+	IndexedAt   string      `json:"indexed_at"`
+	LikeCount   int64       `json:"like_count"`
+	RepostCount int64       `json:"repost_count"`
+	ReplyCount  int64       `json:"reply_count"`
+	LikedByMe   bool        `json:"liked_by_me"`
+	LikeURI     string      `json:"like_uri,omitempty"`
+	Images      []PostImage `json:"images,omitempty"`
 }
 
 // FeedPage is a page of posts with an optional cursor for the next page.
@@ -241,6 +251,23 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 	if pv.Record != nil {
 		if fp, ok := pv.Record.Val.(*appbsky.FeedPost); ok {
 			v.Text = fp.Text
+		}
+	}
+
+	if pv.Viewer != nil && pv.Viewer.Like != nil {
+		v.LikedByMe = true
+		v.LikeURI = *pv.Viewer.Like
+	}
+
+	if pv.Embed != nil && pv.Embed.EmbedImages_View != nil {
+		for _, img := range pv.Embed.EmbedImages_View.Images {
+			if img != nil {
+				v.Images = append(v.Images, PostImage{
+					Thumb:    img.Thumb,
+					Fullsize: img.Fullsize,
+					Alt:      img.Alt,
+				})
+			}
 		}
 	}
 

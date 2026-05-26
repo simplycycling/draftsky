@@ -19,6 +19,14 @@ SET access_token  = $2,
 WHERE did = $1
 RETURNING *;
 
+-- name: UpdateUserAvatar :exec
+UPDATE users SET avatar = $2 WHERE did = $1;
+
+-- name: CreatePostHistory :one
+INSERT INTO post_history (user_id, uri, hashtags)
+VALUES ($1, $2, $3)
+RETURNING *;
+
 -- name: GetRecentTagsByUser :many
 SELECT tag::text AS tag, MAX(ph.created_at) AS last_used
 FROM post_history ph, unnest(ph.hashtags) AS tag

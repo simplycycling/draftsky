@@ -35,4 +35,5 @@ type User struct {
 	CreatedAt    pgtype.Timestamptz
 	Plan         string
 	Theme        string
+	Avatar       pgtype.Text
 }

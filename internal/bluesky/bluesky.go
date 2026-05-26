@@ -15,6 +15,16 @@ import (
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 )
 
+// IsRateLimitError returns true if err is an HTTP 429 response from the Bluesky PDS.
+// Indigo surfaces upstream HTTP errors with the status code in the message.
+func IsRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") || strings.Contains(msg, "ratelimitexceeded")
+}
+
 // hashtagRe matches hashtags — a `#` not preceded by a non-whitespace character,
 // followed by a non-digit, non-whitespace character, then any non-whitespace characters.
 // It is anchored to either the start of string or a whitespace boundary so that
@@ -76,6 +86,26 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 	}
 
 	return &PostResult{URI: out.Uri, CID: out.Cid}, nil
+}
+
+// ExtractHashtags returns the unique hashtag strings (without the leading '#') found in text.
+func ExtractHashtags(text string) []string {
+	matches := hashtagRe.FindAllStringSubmatch(text, -1)
+	seen := make(map[string]struct{}, len(matches))
+	var tags []string
+	for _, m := range matches {
+		tag := strings.TrimRight(m[1], ".,!?;:'\")")
+		tag = strings.TrimPrefix(tag, "#")
+		if tag == "" {
+			continue
+		}
+		if _, dup := seen[tag]; dup {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	return tags
 }
 
 // buildHashtagFacets scans text for hashtags and returns the corresponding facets.

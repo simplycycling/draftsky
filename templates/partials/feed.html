@@ -1,3 +1,20 @@
+{{define "like-button"}}
+<span id="like-{{.URI | printf "%s"}}"
+      class="post-count post-count-like{{if .LikedByMe}} liked{{end}}"
+      hx-target="closest .post-count-like"
+      hx-swap="outerHTML"
+      {{if .LikedByMe}}
+      hx-delete="/api/like"
+      hx-vals='{"uri": "{{.LikeURI}}"}'
+      {{else}}
+      hx-post="/api/like"
+      hx-vals='{"uri": "{{.URI}}", "cid": "{{.CID}}"}'
+      {{end}}
+      hx-trigger="click"
+      style="cursor:pointer"
+      title="{{if .LikedByMe}}Unlike{{else}}Like{{end}}">{{formatCount .LikeCount}}{{if .LikedByMe}}♥{{else}}♡{{end}}</span>
+{{end}}
+
 {{define "feed"}}
 {{template "feed-controls" .}}
 {{if .FeedPage}}
@@ -38,11 +55,20 @@
     </div>
     <div class="post-body">
         <p class="post-text">{{highlightHashtags .Text}}</p>
+        {{if .Images}}
+        <div class="post-images">
+            {{range .Images}}
+            <a href="{{.Fullsize}}" target="_blank" rel="noopener noreferrer" class="post-image-link">
+                <img class="post-image" src="{{.Thumb}}" alt="{{.Alt}}" loading="lazy">
+            </a>
+            {{end}}
+        </div>
+        {{end}}
     </div>
     <div class="post-meta">
         {{if .ReplyCount}}<span class="post-count post-count-reply">{{formatCount .ReplyCount}}</span>{{end}}
         {{if .RepostCount}}<span class="post-count post-count-repost">{{formatCount .RepostCount}}</span>{{end}}
-        {{if .LikeCount}}<span class="post-count post-count-like">{{formatCount .LikeCount}}</span>{{end}}
+        {{template "like-button" .}}
     </div>
 </li>
 {{end}}

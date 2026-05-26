@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	appbsky "github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/atproto/auth/oauth"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/gin-gonic/gin"
@@ -81,6 +82,20 @@ func (h *Handler) HandleCallback(c *gin.Context) {
 		slog.Error("failed to upsert user after OAuth callback", "did", did, "err", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist user session"})
 		return
+	}
+
+	// Fetch the user's avatar from their PDS and persist it. Non-fatal.
+	if sess, resumeErr := h.oauthApp.ResumeSession(c.Request.Context(), sessData.AccountDID, sessData.SessionID); resumeErr != nil {
+		slog.Warn("could not resume session to fetch avatar", "did", did, "err", resumeErr)
+	} else if profile, profileErr := appbsky.ActorGetProfile(c.Request.Context(), sess.APIClient(), did); profileErr != nil {
+		slog.Warn("could not fetch profile for avatar", "did", did, "err", profileErr)
+	} else if profile.Avatar != nil {
+		if avatarErr := h.queries.UpdateUserAvatar(c.Request.Context(), db.UpdateUserAvatarParams{
+			Did:    did,
+			Avatar: pgtype.Text{String: *profile.Avatar, Valid: true},
+		}); avatarErr != nil {
+			slog.Warn("could not store avatar URL", "did", did, "err", avatarErr)
+		}
 	}
 
 	if err := h.setSession(c.Writer, did, sessData.SessionID); err != nil {

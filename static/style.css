@@ -425,9 +425,46 @@ button {
     margin-right: 3px;
 }
 
-.post-count-reply::before  { content: '↩'; }
-.post-count-repost::before { content: '↻'; }
-.post-count-like::before   { content: '♡'; }
+.post-count-reply::before  { content: '↩ '; }
+.post-count-repost::before { content: '↻ '; }
+
+.post-count-like {
+    transition: color 0.1s;
+}
+.post-count-like:hover {
+    color: var(--color-accent);
+}
+.post-count-like.liked {
+    color: var(--color-accent);
+}
+
+/* ---- Post images ---- */
+
+.post-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    margin-left: 46px;
+}
+
+.post-image-link {
+    display: block;
+    flex: 1 1 calc(50% - 3px);
+    max-width: 100%;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--color-card);
+}
+
+.post-image {
+    width: 100%;
+    height: auto;
+    max-height: 300px;
+    object-fit: cover;
+    display: block;
+    border-radius: var(--radius);
+}
 
 /* =========================================================
    Feed states
@@ -964,4 +1001,48 @@ button {
 
 .btn-signin:hover {
     opacity: 0.88;
+}
+
+/* =========================================================
+   Error pages (404, 500)
+   ========================================================= */
+
+.error-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    gap: 12px;
+    text-align: center;
+    padding: 32px;
+}
+
+.error-code {
+    font-size: 5rem;
+    font-weight: 800;
+    color: var(--color-accent);
+    line-height: 1;
+}
+
+.error-message {
+    font-size: 1.1rem;
+    color: var(--color-muted);
+}
+
+.btn-primary {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 10px 24px;
+    background: var(--color-accent);
+    color: #000;
+    border-radius: var(--radius);
+    font-weight: 700;
+    font-size: 0.95rem;
+    text-decoration: none;
+}
+
+.btn-primary:hover {
+    opacity: 0.88;
+    text-decoration: none;
 }

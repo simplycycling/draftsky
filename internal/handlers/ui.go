@@ -60,6 +60,8 @@ type UIHandler struct {
 	tmplHome      *template.Template
 	tmplTemplates *template.Template
 	tmplLogin     *template.Template
+	tmpl404       *template.Template
+	tmpl500       *template.Template
 }
 
 // NewUIHandler parses all page templates and returns a ready UIHandler.
@@ -143,6 +145,14 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmpl404, err := template.ParseFiles("templates/404.html")
+	if err != nil {
+		return nil, err
+	}
+	tmpl500, err := template.ParseFiles("templates/500.html")
+	if err != nil {
+		return nil, err
+	}
 	return &UIHandler{
 		queries:       queries,
 		secret:        secret,
@@ -150,7 +160,27 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		tmplHome:      tmplHome,
 		tmplTemplates: tmplTemplates,
 		tmplLogin:     tmplLogin,
+		tmpl404:       tmpl404,
+		tmpl500:       tmpl500,
 	}, nil
+}
+
+// Handle404 renders the 404 error page.
+func (h *UIHandler) Handle404(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Status(http.StatusNotFound)
+	if err := h.tmpl404.ExecuteTemplate(c.Writer, "404", nil); err != nil {
+		slog.Error("render 404 template", "err", err)
+	}
+}
+
+// Handle500 renders the 500 error page.
+func (h *UIHandler) Handle500(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Status(http.StatusInternalServerError)
+	if err := h.tmpl500.ExecuteTemplate(c.Writer, "500", nil); err != nil {
+		slog.Error("render 500 template", "err", err)
+	}
 }
 
 // HandleLoginPage renders the sign-in page.
@@ -323,11 +353,17 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did string, user db.User) La
 		handle = did
 	}
 
+	avatar := ""
+	if user.Avatar.Valid {
+		avatar = user.Avatar.String
+	}
+
 	return LayoutData{
 		User: PageUser{
 			DID:    did,
 			Handle: handle,
 			Plan:   user.Plan,
+			Avatar: avatar,
 		},
 		Theme:      theme,
 		RecentTags: recentTags,

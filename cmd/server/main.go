@@ -87,10 +87,7 @@ func main() {
 		slog.Info("OAuth: using public client config", "client_id", clientID)
 	}
 
-	// MemStore is an in-memory ClientAuthStore. All OAuth session state
-	// (DPoP keys, nonces) is lost on restart. A PostgreSQL-backed store
-	// will replace this in Phase 2.
-	oauthApp := oauth.NewClientApp(&oauthConfig, oauth.NewMemStore())
+	oauthApp := oauth.NewClientApp(&oauthConfig, auth.NewPGStore(pool))
 	poster := bluesky.New(oauthApp)
 	feedClient := feed.New(oauthApp)
 
@@ -98,6 +95,11 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
+	// TODO: scope to Railway's CIDR once it is published; "0.0.0.0/0" trusts all proxies.
+	if err := r.SetTrustedProxies([]string{"0.0.0.0/0"}); err != nil {
+		slog.Error("failed to set trusted proxies", "err", err)
+		os.Exit(1)
+	}
 
 	secret := []byte(sessionSecret)
 	secure := appEnv == "production"
@@ -121,6 +123,7 @@ func main() {
 		os.Exit(1)
 	}
 	r.GET("/login", uiH.HandleLoginPage)
+	r.NoRoute(uiH.Handle404)
 
 	// Authenticated web UI routes
 	web := r.Group("/", middleware.RequireSession(secret))
@@ -146,6 +149,10 @@ func main() {
 
 	postH := handlers.NewPostHandler(queries, poster)
 	api.POST("/post", postH.HandleCreatePost)
+
+	likeH := handlers.NewLikeHandler(oauthApp)
+	api.POST("/like", likeH.HandleCreateLike)
+	api.DELETE("/like", likeH.HandleDeleteLike)
 
 	feedH := handlers.NewFeedHandler(feedClient)
 	api.GET("/feed/following", feedH.HandleGetFollowingFeed)
