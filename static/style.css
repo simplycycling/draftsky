@@ -254,9 +254,15 @@ button {
 }
 
 .tag-link {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font-family: inherit;
     color: var(--color-accent);
     font-size: 0.9rem;
     font-weight: 500;
+    text-align: left;
 }
 
 .muted-text {

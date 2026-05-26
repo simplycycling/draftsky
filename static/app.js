@@ -279,11 +279,13 @@ async function saveReorder() {
 
 // --- Feed switching ---
 
-document.body.addEventListener('postSubmitted', function(evt) {
-    const { hashtags } = evt.detail;
-    let feedURL = '/feed/following';
-    if (hashtags && hashtags.length > 0) {
-        feedURL = '/feed/hashtags?tags=' + hashtags.map(encodeURIComponent).join(',');
-    }
+function switchToHashtagFeed(tags) {
+    const feedURL = (tags && tags.length > 0)
+        ? '/feed/hashtags?tags=' + tags.map(encodeURIComponent).join(',')
+        : '/feed/following';
     htmx.ajax('GET', feedURL, { target: '#feed-root', swap: 'innerHTML' });
+}
+
+document.body.addEventListener('postSubmitted', function(evt) {
+    switchToHashtagFeed(evt.detail.hashtags);
 });

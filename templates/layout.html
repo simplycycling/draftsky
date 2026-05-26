@@ -48,7 +48,7 @@
         {{if .RecentTags}}
         <ul class="recent-tags">
             {{range .RecentTags}}
-            <li><a href="/api/feed/hashtags?tags={{.}}" class="tag-link">#{{.}}</a></li>
+            <li><button type="button" class="tag-link" onclick="switchToHashtagFeed(['{{.}}'])">#{{.}}</button></li>
             {{end}}
         </ul>
         {{else}}
