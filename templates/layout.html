@@ -28,12 +28,12 @@
                 <a href="/" class="nav-link">Home</a>
                 <a href="/templates" class="nav-link">Templates</a>
                 <a href="/settings" class="nav-link">Settings</a>
-                <form action="/auth/logout" method="POST" style="margin-top: auto; padding-top: 8px;">
+                <hr class="nav-divider">
+                <button class="btn-new-post" onclick="openComposer()">New Post</button>
+                <form action="/auth/logout" method="POST">
                     <button type="submit" class="nav-link btn-logout">Sign out</button>
                 </form>
             </nav>
-
-            <button class="btn-new-post" onclick="openComposer()">New Post</button>
         </div>
     </aside>
 
