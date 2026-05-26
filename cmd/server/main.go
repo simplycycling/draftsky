@@ -95,11 +95,11 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
-	// TODO: scope to Railway's CIDR once it is published; "0.0.0.0/0" trusts all proxies.
-	if err := r.SetTrustedProxies([]string{"0.0.0.0/0"}); err != nil {
-		slog.Error("failed to set trusted proxies", "err", err)
-		os.Exit(1)
-	}
+	// Railway terminates TLS at the edge and forwards requests via an internal proxy.
+	// TrustedProxies(nil) disables network-level proxy IP trust; ForwardedByClientIP
+	// reads the real client IP from the X-Forwarded-For header set by Railway's proxy.
+	r.SetTrustedProxies(nil)
+	r.ForwardedByClientIP = true
 
 	secret := []byte(sessionSecret)
 	secure := appEnv == "production"
