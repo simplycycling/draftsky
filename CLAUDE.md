@@ -435,3 +435,51 @@ Beyond hardening, Session 8 adds:
 ### Phase 4 — iOS app
 SwiftUI app consuming the same `/api/*` endpoints. All features available on web
 should be available on iOS at parity.
+
+---
+
+## Full Client Roadmap
+
+DraftSky's long-term goal is to be a complete Bluesky client replacement on both web
+and iOS. The following features are required to achieve that, roughly in priority order:
+
+### GA blockers (before public launch)
+- **Replies** — composer reply mode with correct AT Protocol threading (`reply.root`
+  and `reply.parent` references, both `{uri, cid}` pairs)
+- **Reposts** — `app.bsky.feed.repost` record, simple toggle alongside likes
+- **Settings page** — currently nav link goes nowhere; needed for theme selector
+- **Theme selector** — paid users can select from the four themes on settings page
+- **www redirect** — `draftsky.social` → `https://www.draftsky.social` at root
+- **robots.txt** — reduce scanner noise in logs
+- **Favicon** — currently 404ing
+
+### Post-GA / Phase 3 priorities
+- **Saved feeds** — fetch and display the user's pinned/saved feeds from
+  `app.bsky.feed.getSavedFeeds`; allow switching between them in the centre column
+  alongside Following and hashtag feeds
+- **Notifications** — `app.bsky.notification.listNotifications`; notification feed
+  view and unread count badge in the left rail
+- **Own profile view and edit** — view own posts, followers, following count;
+  edit display name, description, avatar via `com.atproto.repo.putRecord`
+- **Other user profiles** — click on a handle/avatar to view their profile and posts
+  via `app.bsky.actor.getProfile` and `app.bsky.feed.getAuthorFeed`
+- **Free tier enforcement** — 5 template limit for free users; `RequirePaidPlan`
+  middleware for theme enforcement
+
+### Phase 4 and beyond
+- **Bookmarks** — Bluesky doesn't have native bookmarks yet; track locally in
+  `post_history` or a new `bookmarks` table until AT Protocol supports it natively
+- **Direct messages** — `chat.bsky.convo.*` lexicon; significantly more complex than
+  other features, requires separate chat proxy infrastructure
+- **Photo posting** — blob upload via `com.atproto.repo.uploadBlob`, attach to post
+  record
+- **Thread view** — clicking a post expands the full thread via
+  `app.bsky.feed.getPostThread`
+- **Search** — full text and user search via `app.bsky.feed.searchPosts` and
+  `app.bsky.actor.searchActors`
+
+### Technical debt to resolve
+- Trusted proxies scoped to Railway's actual CIDR instead of `0.0.0.0/0`
+- Rate limiter `sync.Map` grows unbounded — acceptable for now, needs Redis or
+  periodic cleanup at scale
+- MemStore note: already replaced with PostgreSQL store in Session 8
