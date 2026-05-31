@@ -61,7 +61,8 @@ function updateCounter() {
     const suffix = (opt && opt.dataset.suffix) ? opt.dataset.suffix : '';
     let combined;
     if (suffix) {
-        const trimmed = text.replace(/ +$/, '');
+        const normalised = text.replace(/\r\n/g, '\n');
+        const trimmed = normalised.replace(/ +$/, '');
         combined = trimmed.endsWith('\n') ? trimmed + suffix : trimmed + ' ' + suffix;
     } else {
         combined = text;
