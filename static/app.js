@@ -59,7 +59,13 @@ function updateCounter() {
     const text = document.getElementById('composer-textarea').value;
     const opt = selectedOption();
     const suffix = (opt && opt.dataset.suffix) ? opt.dataset.suffix : '';
-    const combined = suffix ? text + ' ' + suffix : text;
+    let combined;
+    if (suffix) {
+        const trimmed = text.replace(/ +$/, '');
+        combined = trimmed.endsWith('\n') ? trimmed + suffix : trimmed + ' ' + suffix;
+    } else {
+        combined = text;
+    }
     const remaining = MAX_CHARS - graphemeLength(combined);
 
     const counter = document.getElementById('char-counter');

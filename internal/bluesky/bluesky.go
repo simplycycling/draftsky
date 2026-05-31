@@ -63,7 +63,12 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 
 	fullText := text
 	if suffix != "" {
-		fullText = text + " " + suffix
+		trimmed := strings.TrimRight(text, " ")
+		if strings.HasSuffix(trimmed, "\n") {
+			fullText = trimmed + suffix
+		} else {
+			fullText = trimmed + " " + suffix
+		}
 	}
 	fullText = strings.TrimSpace(fullText)
 
