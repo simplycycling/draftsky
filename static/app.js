@@ -92,7 +92,7 @@ function onTemplateChange() {
 }
 
 async function submitPost() {
-    const text = document.getElementById('composer-textarea').value.trim();
+    const text = document.getElementById('composer-textarea').value.trimStart();
     if (!text) return;
 
     const opt = selectedOption();
