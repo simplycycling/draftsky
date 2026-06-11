@@ -93,6 +93,17 @@ func main() {
 
 	// --- HTTP server ---
 	r := gin.New()
+
+	// www redirect — must be first so it fires before any other middleware or routes.
+	r.Use(func(c *gin.Context) {
+		if c.Request.Host == "draftsky.social" {
+			c.Redirect(301, "https://www.draftsky.social"+c.Request.RequestURI)
+			c.Abort()
+			return
+		}
+		c.Next()
+	})
+
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
 	// Railway terminates TLS at the edge and forwards requests via an internal proxy.
