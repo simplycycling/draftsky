@@ -773,6 +773,7 @@ button {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 /* ---- Shared input style for template forms ---- */
@@ -981,6 +982,7 @@ button {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 .tr-edit-fields .tr-input:first-child {

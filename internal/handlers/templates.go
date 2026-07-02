@@ -144,6 +144,15 @@ func (h *TemplateHandler) HandleCreateTemplate(c *gin.Context) {
 		return
 	}
 
+	if len([]rune(req.Name)) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "template name must be 100 characters or fewer"})
+		return
+	}
+	if len([]rune(req.Suffix)) > 250 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "template suffix must be 250 characters or fewer"})
+		return
+	}
+
 	user, ok := h.resolveUser(c, did)
 	if !ok {
 		return
@@ -197,6 +206,15 @@ func (h *TemplateHandler) HandleUpdateTemplate(c *gin.Context) {
 	var req updateTemplateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len([]rune(req.Name)) > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "template name must be 100 characters or fewer"})
+		return
+	}
+	if len([]rune(req.Suffix)) > 250 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "template suffix must be 250 characters or fewer"})
 		return
 	}
 

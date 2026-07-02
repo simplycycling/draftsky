@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 
 	"github.com/bluesky-social/indigo/atproto/auth/oauth"
@@ -106,6 +107,7 @@ func main() {
 
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
+	r.Use(middleware.SecurityHeaders())
 	// Railway terminates TLS at the edge and forwards requests via an internal proxy.
 	// TrustedProxies(nil) disables network-level proxy IP trust; ForwardedByClientIP
 	// reads the real client IP from the X-Forwarded-For header set by Railway's proxy.
@@ -118,6 +120,28 @@ func main() {
 
 	// Static assets
 	r.Static("/static", "./static")
+
+	// Well-known root files
+	r.GET("/robots.txt", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(
+			"User-agent: *\n"+
+				"Allow: /\n"+
+				"Allow: /login\n"+
+				"Disallow: /api/\n"+
+				"Disallow: /auth/\n"+
+				"Disallow: /feed/\n"+
+				"Disallow: /templates\n"+
+				"Disallow: /settings\n",
+		))
+	})
+	r.GET("/favicon.svg", func(c *gin.Context) {
+		c.Header("Content-Type", "image/svg+xml")
+		c.File("./static/favicon.svg")
+	})
+	r.GET("/favicon.ico", func(c *gin.Context) {
+		c.Header("Content-Type", "image/svg+xml")
+		c.File("./static/favicon.svg")
+	})
 
 	// Public routes
 	r.GET("/health", handlers.HandleHealth)
@@ -148,26 +172,30 @@ func main() {
 	// Protected route group — all routes added here require a valid session cookie.
 	api := r.Group("/api", middleware.RequireAuth(secret))
 
-	templateH := handlers.NewTemplateHandler(queries, pool)
-	// /reorder must be registered before /:id so Gin's static-segment priority
-	// kicks in and "reorder" is never matched as a template ID.
-	api.PUT("/templates/reorder", templateH.HandleReorderTemplates)
-	api.GET("/templates", templateH.HandleGetTemplates)
-	api.POST("/templates", templateH.HandleCreateTemplate)
-	api.PUT("/templates/:id", templateH.HandleUpdateTemplate)
-	api.DELETE("/templates/:id", templateH.HandleDeleteTemplate)
-	api.GET("/composer/templates", templateH.HandleGetComposerTemplates)
-
 	postH := handlers.NewPostHandler(queries, poster)
 	api.POST("/post", postH.HandleCreatePost)
-
-	likeH := handlers.NewLikeHandler(oauthApp)
-	api.POST("/like", likeH.HandleCreateLike)
-	api.DELETE("/like", likeH.HandleDeleteLike)
 
 	feedH := handlers.NewFeedHandler(feedClient)
 	api.GET("/feed/following", feedH.HandleGetFollowingFeed)
 	api.GET("/feed/hashtags", feedH.HandleGetHashtagFeed)
+
+	// Rate-limited operations — 60 req/min per DID for template CRUD and likes.
+	opsLimiter := middleware.NewOperationsRateLimiter()
+	rated := api.Group("/", opsLimiter.Middleware())
+
+	templateH := handlers.NewTemplateHandler(queries, pool)
+	// /reorder must be registered before /:id so Gin's static-segment priority
+	// kicks in and "reorder" is never matched as a template ID.
+	rated.PUT("/templates/reorder", templateH.HandleReorderTemplates)
+	rated.GET("/templates", templateH.HandleGetTemplates)
+	rated.POST("/templates", templateH.HandleCreateTemplate)
+	rated.PUT("/templates/:id", templateH.HandleUpdateTemplate)
+	rated.DELETE("/templates/:id", templateH.HandleDeleteTemplate)
+	rated.GET("/composer/templates", templateH.HandleGetComposerTemplates)
+
+	likeH := handlers.NewLikeHandler(oauthApp)
+	rated.POST("/like", likeH.HandleCreateLike)
+	rated.DELETE("/like", likeH.HandleDeleteLike)
 
 	slog.Info("starting server", "port", port, "env", appEnv)
 	if err := r.Run(":" + port); err != nil {

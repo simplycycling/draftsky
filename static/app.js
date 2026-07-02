@@ -151,13 +151,39 @@ document.addEventListener('keydown', e => {
 
 // --- Template management ---
 
+// Updates a character counter span and optionally disables a submit button when over limit.
+function updateTrCounter(inputEl, max, counterId, btnId) {
+    const remaining = max - [...inputEl.value].length;
+    const counter = document.getElementById(counterId);
+    if (counter) {
+        counter.textContent = String(remaining);
+        counter.className = 'char-counter' +
+            (remaining < 0 ? ' over' : remaining < 20 ? ' warn' : '');
+    }
+    if (btnId) {
+        const btn = document.getElementById(btnId);
+        if (btn) {
+            const form = inputEl.closest('form');
+            const anyOver = form
+                ? Array.from(form.querySelectorAll('.char-counter')).some(el => el.classList.contains('over'))
+                : remaining < 0;
+            btn.disabled = anyOver;
+        }
+    }
+}
+
 function showEdit(id) {
     const row = document.querySelector(`[data-id="${id}"]`);
     if (row) row.draggable = false;
     document.getElementById('view-' + id).style.display = 'none';
     document.getElementById('edit-' + id).style.display = 'block';
     const nameInput = document.querySelector(`#edit-${id} input[name="name"]`);
-    if (nameInput) nameInput.focus();
+    if (nameInput) {
+        nameInput.focus();
+        updateTrCounter(nameInput, 100, `edit-name-counter-${id}`, `save-btn-${id}`);
+    }
+    const suffixInput = document.querySelector(`#edit-${id} input[name="suffix"]`);
+    if (suffixInput) updateTrCounter(suffixInput, 250, `edit-suffix-counter-${id}`, `save-btn-${id}`);
 }
 
 function cancelEdit(id) {
@@ -186,6 +212,13 @@ function onAddTemplateResponse(evt) {
         form.reset();
         err.style.display = 'none';
         err.textContent = '';
+        // Reset counters to their starting values after form.reset() clears the inputs.
+        const nc = document.getElementById('add-name-counter');
+        if (nc) { nc.textContent = '100'; nc.className = 'char-counter'; }
+        const sc = document.getElementById('add-suffix-counter');
+        if (sc) { sc.textContent = '250'; sc.className = 'char-counter'; }
+        const addBtn = document.getElementById('add-btn');
+        if (addBtn) addBtn.disabled = false;
         // Remove empty-state placeholder if present
         const emptyState = document.getElementById('empty-state');
         if (emptyState) emptyState.remove();

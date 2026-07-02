@@ -2,11 +2,67 @@ package middleware
 
 import (
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 
 	"github.com/rsherman/draftsky/internal/auth"
 )
+
+// SecurityHeaders adds standard security response headers to every request.
+// TODO: migrate script-src and style-src to CSP nonces to remove 'unsafe-inline'.
+func SecurityHeaders() gin.HandlerFunc {
+	const csp = "default-src 'self'; " +
+		"script-src 'self' 'unsafe-inline' https://unpkg.com; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' https://cdn.bsky.app https:; " +
+		"connect-src 'self'; " +
+		"frame-ancestors 'none'"
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Content-Security-Policy", csp)
+		c.Next()
+	}
+}
+
+// OperationsRateLimiter enforces a per-DID rate limit for high-frequency operations
+// (likes, template CRUD). Applies a 60 requests/minute limit with a burst of 60.
+type OperationsRateLimiter struct {
+	limiters sync.Map // DID → *rate.Limiter
+}
+
+// NewOperationsRateLimiter constructs an OperationsRateLimiter.
+func NewOperationsRateLimiter() *OperationsRateLimiter {
+	return &OperationsRateLimiter{}
+}
+
+func (rl *OperationsRateLimiter) limiterFor(did string) *rate.Limiter {
+	const limit = 60
+	v, _ := rl.limiters.LoadOrStore(did, rate.NewLimiter(rate.Every(time.Minute/limit), limit))
+	return v.(*rate.Limiter)
+}
+
+// Middleware returns a Gin HandlerFunc that enforces the per-DID rate limit.
+// RequireAuth must run before this middleware to populate ContextKeyDID.
+func (rl *OperationsRateLimiter) Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		did := c.GetString(ContextKeyDID)
+		if did == "" {
+			c.Next()
+			return
+		}
+		if !rl.limiterFor(did).Allow() {
+			c.Header("Retry-After", "60")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests — please wait a moment and try again."})
+			return
+		}
+		c.Next()
+	}
+}
 
 // ContextKeyDID is the Gin context key under which the authenticated user's DID
 // is stored by RequireAuth. Handlers retrieve it with c.GetString(middleware.ContextKeyDID).

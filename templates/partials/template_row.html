@@ -26,12 +26,16 @@
               hx-on::after-request="onEditResponse(event, {{.ID}})">
             <div class="tr-edit-fields">
                 <input class="tr-input" type="text" name="name" value="{{.Name}}"
-                       placeholder="Template name" required autocomplete="off">
+                       placeholder="Template name" required autocomplete="off"
+                       oninput="updateTrCounter(this, 100, 'edit-name-counter-{{.ID}}', 'save-btn-{{.ID}}')">
+                <span class="char-counter" id="edit-name-counter-{{.ID}}"></span>
                 <input class="tr-input tr-input-suffix" type="text" name="suffix" value="{{.Suffix}}"
-                       placeholder="#hashtags to append" required autocomplete="off">
+                       placeholder="#hashtags to append" required autocomplete="off"
+                       oninput="updateTrCounter(this, 250, 'edit-suffix-counter-{{.ID}}', 'save-btn-{{.ID}}')">
+                <span class="char-counter" id="edit-suffix-counter-{{.ID}}"></span>
             </div>
             <div class="tr-edit-actions">
-                <button type="submit" class="btn-tr btn-tr-save">Save</button>
+                <button type="submit" id="save-btn-{{.ID}}" class="btn-tr btn-tr-save">Save</button>
                 <button type="button" class="btn-tr" onclick="cancelEdit({{.ID}})">Cancel</button>
             </div>
             <div id="edit-error-{{.ID}}" class="form-error" style="display:none"></div>
