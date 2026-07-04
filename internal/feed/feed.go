@@ -49,13 +49,17 @@ type PostView struct {
 	ReplyCount  int64       `json:"reply_count"`
 	LikedByMe    bool              `json:"liked_by_me"`
 	LikeURI      string            `json:"like_uri,omitempty"`
+	RepostedByMe bool              `json:"reposted_by_me"`
+	RepostURI    string            `json:"repost_uri,omitempty"`
 	Images       []PostImage       `json:"images,omitempty"`
 	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
 	// ReplyRootURI / ReplyRootCID are populated from the post's own reply.root when
-	// the post is itself a reply. Empty for top-level posts. Used by the composer
-	// reply mode to thread replies to the correct thread root.
+	// the post is itself a reply. Empty for top-level posts.
 	ReplyRootURI string `json:"reply_root_uri,omitempty"`
 	ReplyRootCID string `json:"reply_root_cid,omitempty"`
+	// RepostedBy is non-nil when the post appears in the timeline because someone the
+	// user follows reposted it. Nil for original posts and all hashtag-feed results.
+	RepostedBy *PostAuthor `json:"reposted_by,omitempty"`
 }
 
 // FeedPage is a page of posts with an optional cursor for the next page.
@@ -105,9 +109,25 @@ func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor st
 
 	posts := make([]PostView, 0, len(out.Feed))
 	for _, item := range out.Feed {
-		if item != nil && item.Post != nil {
-			posts = append(posts, postViewFromBsky(item.Post))
+		if item == nil || item.Post == nil {
+			continue
 		}
+		pv := postViewFromBsky(item.Post)
+		if item.Reason != nil && item.Reason.FeedDefs_ReasonRepost != nil {
+			r := item.Reason.FeedDefs_ReasonRepost
+			if r.By != nil {
+				by := PostAuthor{
+					DID:    r.By.Did,
+					Handle: r.By.Handle,
+					Avatar: r.By.Avatar,
+				}
+				if r.By.DisplayName != nil {
+					by.DisplayName = *r.By.DisplayName
+				}
+				pv.RepostedBy = &by
+			}
+		}
+		posts = append(posts, pv)
 	}
 
 	var nextCursor string
@@ -275,6 +295,10 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 	if pv.Viewer != nil && pv.Viewer.Like != nil {
 		v.LikedByMe = true
 		v.LikeURI = *pv.Viewer.Like
+	}
+	if pv.Viewer != nil && pv.Viewer.Repost != nil {
+		v.RepostedByMe = true
+		v.RepostURI = *pv.Viewer.Repost
 	}
 
 	if pv.Embed != nil {

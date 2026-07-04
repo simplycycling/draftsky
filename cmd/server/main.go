@@ -197,6 +197,10 @@ func main() {
 	rated.POST("/like", likeH.HandleCreateLike)
 	rated.DELETE("/like", likeH.HandleDeleteLike)
 
+	repostH := handlers.NewRepostHandler(oauthApp)
+	rated.POST("/repost", repostH.HandleCreateRepost)
+	rated.DELETE("/repost", repostH.HandleDeleteRepost)
+
 	slog.Info("starting server", "port", port, "env", appEnv)
 	if err := r.Run(":" + port); err != nil {
 		slog.Error("server error", "err", err)

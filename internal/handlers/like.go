@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,7 +80,8 @@ func (h *LikeHandler) HandleCreateLike(c *gin.Context) {
 		return
 	}
 
-	pv := feed.PostView{URI: req.URI, CID: req.CID, LikedByMe: true, LikeURI: out.Uri}
+	count, _ := strconv.ParseInt(c.PostForm("count"), 10, 64)
+	pv := feed.PostView{URI: req.URI, CID: req.CID, LikedByMe: true, LikeURI: out.Uri, LikeCount: count + 1}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	renderLikeButton(c, pv)
 }
@@ -140,8 +142,15 @@ func (h *LikeHandler) HandleDeleteLike(c *gin.Context) {
 		return
 	}
 
+	count, _ := strconv.ParseInt(c.PostForm("count"), 10, 64)
+	if count == 0 {
+		count, _ = strconv.ParseInt(c.Query("count"), 10, 64)
+	}
+	if count > 0 {
+		count--
+	}
 	// Return a "like" button (not liked) referencing the original post so the user can re-like.
-	pv := feed.PostView{LikedByMe: false, URI: postURI, CID: postCID}
+	pv := feed.PostView{LikedByMe: false, URI: postURI, CID: postCID, LikeCount: count}
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	renderLikeButton(c, pv)
 }
@@ -161,19 +170,18 @@ func renderLikeButton(c *gin.Context, pv feed.PostView) {
 	heart := "♡"
 	action := "Like"
 	hxMethod := `hx-post="/api/like"`
-	hxVals := fmt.Sprintf(`hx-vals='{"uri": %q, "cid": %q}'`, pv.URI, pv.CID)
+	hxVals := fmt.Sprintf(`hx-vals='{"uri": %q, "cid": %q, "count": "%d"}'`, pv.URI, pv.CID, pv.LikeCount)
 	if pv.LikedByMe {
 		heart = "♥"
 		action = "Unlike"
 		hxMethod = `hx-delete="/api/like"`
-		// Include post_uri and post_cid so the unlike handler can build a working re-like button.
-		hxVals = fmt.Sprintf(`hx-vals='{"uri": %q, "post_uri": %q, "post_cid": %q}'`, pv.LikeURI, pv.URI, pv.CID)
+		hxVals = fmt.Sprintf(`hx-vals='{"uri": %q, "post_uri": %q, "post_cid": %q, "count": "%d"}'`, pv.LikeURI, pv.URI, pv.CID, pv.LikeCount)
 	}
 	likedClass := ""
 	if pv.LikedByMe {
 		likedClass = " liked"
 	}
-	countStr := likeCountStr(pv.LikeCount)
+	countStr := countDisplayStr(pv.LikeCount)
 	html := fmt.Sprintf(
 		`<span class="post-count post-count-like%s" hx-target="closest .post-count-like" hx-swap="outerHTML" %s %s hx-trigger="click" style="cursor:pointer" title="%s">%s%s</span>`,
 		likedClass, hxMethod, hxVals, action, countStr, heart,
@@ -181,9 +189,11 @@ func renderLikeButton(c *gin.Context, pv feed.PostView) {
 	c.String(http.StatusOK, html)
 }
 
-func likeCountStr(n int64) string {
-	if n <= 0 {
-		return ""
+// countDisplayStr formats an interaction count for display, always showing the number
+// including zero so the button width is stable across state transitions.
+func countDisplayStr(n int64) string {
+	if n < 0 {
+		n = 0
 	}
 	if n >= 1000 {
 		return fmt.Sprintf("%.1fK", float64(n)/1000)

@@ -453,6 +453,37 @@ button {
     color: var(--color-accent);
 }
 
+.post-count-repost {
+    cursor: pointer;
+    transition: color 0.1s;
+}
+
+.post-count-repost:hover {
+    color: var(--color-accent);
+}
+
+.post-count-repost.reposted {
+    color: var(--color-accent);
+}
+
+.repost-attribution {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 46px;
+    margin-bottom: 4px;
+    font-size: 0.78rem;
+    color: var(--color-muted);
+}
+
+.repost-attribution-icon {
+    font-size: 0.85rem;
+}
+
+.repost-attribution-name {
+    font-weight: 600;
+}
+
 .post-count-like {
     transition: color 0.1s;
 }
