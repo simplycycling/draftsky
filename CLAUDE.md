@@ -2,19 +2,21 @@
 
 ## Project Overview
 
-DraftSky is a multi-user Bluesky posting client with template support and an integrated
-feed. Users authenticate via Bluesky OAuth, create named templates (pre-composed hashtag
-sets and recurring text), and select a template when composing a post. The template's
-suffix is appended to their post before it is submitted to Bluesky via the AT Protocol.
+DraftSky is a multi-user Bluesky client built around template-based posting, with an
+integrated feed. Users authenticate via Bluesky OAuth, create named templates
+(pre-composed hashtag sets and recurring text), and select a template when composing a
+post. The template's suffix is appended to their post before it is submitted to Bluesky
+via the AT Protocol.
 
 The default view is the user's Following feed. After a post is submitted, DraftSky
 automatically switches to a merged hashtag feed — a combined, recency-sorted stream of
 all hashtags used in that post — so the user can immediately see the conversation they
 have just entered. The Following feed is always accessible to return to.
 
-The primary motivation is reducing repetitive hashtag entry for topic-specific posting
-(e.g. sports coverage, hobby communities, professional topics). DraftSky is intended as
-a public, production web application with a companion iOS app in a later phase.
+DraftSky is live in private beta at https://www.draftsky.social. The long-term goal is
+a complete Bluesky client replacement on web and iOS. The primary motivation is
+reducing repetitive hashtag entry for topic-specific posting (sports coverage, hobby
+communities, professional topics, project promotion).
 
 ---
 
@@ -30,14 +32,14 @@ a public, production web application with a companion iOS app in a later phase.
 | Auth         | AT Protocol OAuth 2.0 (PKCE)                    |
 | Bluesky API  | github.com/bluesky-social/indigo                |
 | Deployment   | Railway (Go binary + managed PostgreSQL)        |
-| iOS (Phase 3)| SwiftUI, hitting the same JSON API              |
+| iOS (future) | SwiftUI, hitting the same JSON API              |
 
 ---
 
 ## Architecture
 
 DraftSky is an API-first application. The Go backend serves both the HTMX-driven web UI
-and a JSON API. The iOS app (Phase 3) will consume the same JSON API endpoints.
+and a JSON API. The iOS app (future phase) will consume the same JSON API endpoints.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -46,20 +48,23 @@ and a JSON API. The iOS app (Phase 3) will consume the same JSON API endpoints.
 │  /auth/*         AT Protocol OAuth      │
 │  /api/templates  Template CRUD (JSON)   │
 │  /api/post       Compose + post (JSON)  │
+│  /api/like       Like/unlike (JSON)     │
 │  /api/feed       Following + hashtag    │
+│  /feed/*         HTMX feed partials     │
 │  /*              HTMX web UI            │
 └───────────────┬─────────────────────────┘
                 │ same /api/* endpoints
       ┌─────────┴──────────┐
       │                    │
   HTMX Web UI          iOS App
-  (Go templates)       (SwiftUI, Phase 3)
+  (Go templates)       (SwiftUI, future)
 ```
 
 The web UI is server-side rendered using Go's `html/template` package. HTMX handles
-dynamic interactions (template CRUD without full page reloads, live post preview,
-character count, feed polling). There is no separate frontend build step and no
-JavaScript framework.
+dynamic interactions (template CRUD without full page reloads, feed swaps, likes,
+infinite scroll). There is no separate frontend build step and no JavaScript framework.
+JSON API handlers and HTMX partial handlers are kept separate — the JSON API stays pure
+for the future iOS app.
 
 ---
 
@@ -67,43 +72,61 @@ JavaScript framework.
 
 ### PostgreSQL over SQLite
 This is a public multi-user application. PostgreSQL is the production database from day
-one. Do not suggest SQLite, even for development — use a local PostgreSQL instance or
-a Railway dev environment to keep parity.
+one. Do not suggest SQLite, even for development — use the local Docker PostgreSQL
+instance (`draftsky-dev-db`) to keep parity.
 
 ### sqlc for database access
-All database queries are written as raw SQL in `/db/queries/`. sqlc generates type-safe
-Go code from these queries. Do not use an ORM. Do not write manual `database/sql` query
-boilerplate. When adding a new query, add it to the appropriate `.sql` file and re-run
-`sqlc generate`.
+All database queries are written as raw SQL in `/internal/db/queries/`. sqlc generates
+type-safe Go code from these queries. Do not use an ORM. Do not write manual
+`database/sql` query boilerplate. When adding a new query, add it to the appropriate
+`.sql` file and re-run `sqlc generate`.
+**Note:** `sqlc.yaml` schema must point at `.up.sql` migration files only — never at the
+migrations directory as a whole.
 
 ### AT Protocol OAuth (not app passwords)
 DraftSky is multi-user and public. Auth uses the AT Protocol OAuth 2.0 PKCE flow, not
 app passwords. Each user authenticates through their own PDS (Personal Data Server).
 The user's DID (Decentralised Identifier) is the canonical user identifier in the
-database — not their handle, which can change.
+database — not their handle, which can change. OAuth client state (PKCE verifiers,
+pending sessions, tokens) is stored in a PostgreSQL-backed ClientAuthStore
+(`internal/auth/pgstore.go`, tables `oauth_sessions` and `oauth_auth_requests`) so it
+survives server restarts.
 
 ### HTMX over a JS framework
 The web UI is intentionally kept in Go-land. HTMX attributes drive dynamic behaviour.
 Do not introduce React, Vue, or any npm-based frontend toolchain. Vanilla JS is
-acceptable for small enhancements (e.g. character counter) but should be minimal and
-inline or in a single `/static/app.js` file.
+acceptable for small enhancements and lives in `/static/app.js`.
 
 ### Bluesky posts use facets
 Hashtags in Bluesky are not plain text — they are `facets` in the `app.bsky.feed.post`
 lexicon (rich text byte-range annotations). Always construct posts using the indigo
-library's richtext helpers, never by naive string concatenation. This applies to both
-hashtags and mentions.
+library and the existing helpers in `internal/bluesky/bluesky.go` (`buildHashtagFacets`,
+`ExtractHashtags`), never by naive string concatenation. Byte offsets are UTF-8 byte
+positions, not rune positions.
+
+### Replies use AT Protocol threading
+Replies require a `reply` object with both `root` and `parent` `{uri, cid}` StrongRefs.
+For a reply to a top-level post, root == parent. For a reply to a reply, root must be
+the original thread root — `PostView` carries `ReplyRootURI`/`ReplyRootCID` from each
+post's own `reply.root` so the composer threads correctly. Reply fields on
+`POST /api/post` are all-or-nothing (400 if partially supplied).
 
 ### Feed behaviour
 The default feed is the user's Following feed (`app.bsky.feed.getTimeline`). After a
 post is successfully submitted, the UI automatically switches to a merged hashtag feed
-built by querying `app.bsky.feed.searchPosts` for each hashtag in the post, merging
-the results, and sorting by `indexedAt` descending. The merge happens server-side — the
-`/api/feed/hashtags` endpoint accepts a list of hashtags and returns a single unified
-feed. The user can return to their Following feed at any time.
+built by querying `app.bsky.feed.searchPosts` for each hashtag concurrently, merging
+server-side, deduplicating by URI, and sorting by `indexedAt` descending. Replies
+without hashtags refresh the current feed instead (tracked via `currentFeedURL` in
+app.js). Clicking a recent tag in the right rail triggers the same HTMX feed switch via
+`switchToHashtagFeed()`.
 
-Phase 2 will introduce a toggle between the merged view and a per-hashtag tabbed view.
-Until then, merged is the only mode and the toggle does not exist in the UI.
+All feed requests are authenticated under the user's OAuth session (via
+`resumeAPIClient`), so viewer state (`LikedByMe`, `LikeURI`) is populated.
+
+`PostView` includes: author (DID, handle, display name, avatar), text, counts,
+`LikedByMe`/`LikeURI`, `Images []PostImage` (from `app.bsky.embed.images#view`),
+`ExternalLink *PostExternalLink` (from `app.bsky.embed.external#view`), and
+`ReplyRootURI`/`ReplyRootCID`.
 
 ---
 
@@ -114,11 +137,12 @@ CREATE TABLE users (
     id            SERIAL PRIMARY KEY,
     did           TEXT UNIQUE NOT NULL,   -- e.g. did:plc:abc123 (canonical identifier)
     handle        TEXT,                   -- e.g. roger.bsky.social (may change)
+    avatar        TEXT,                   -- avatar URL fetched at login via getProfile
     access_token  TEXT,
     refresh_token TEXT,
     token_expiry  TIMESTAMPTZ,
     plan          TEXT NOT NULL DEFAULT 'free', -- 'free' | 'paid'; set to 'paid' on verified IAP
-    theme         TEXT NOT NULL DEFAULT 'ocean', -- see Themes section; paid users only for non-default
+    theme         TEXT NOT NULL DEFAULT 'ocean', -- see Themes; non-default is paid-only
     created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -133,78 +157,111 @@ CREATE TABLE post_history (
 CREATE TABLE templates (
     id         SERIAL PRIMARY KEY,
     user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    name       TEXT NOT NULL,             -- e.g. "Devils Game"
-    suffix     TEXT NOT NULL,             -- e.g. "#NJDevils #GoAvsGo #NHL"
+    name       TEXT NOT NULL,             -- e.g. "Devils Game"; max 100 runes (validated)
+    suffix     TEXT NOT NULL,             -- e.g. "#NJDevils #NHL"; max 250 runes (validated)
     position   INTEGER DEFAULT 0,         -- display order in dropdown
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, name)
 );
+
+-- oauth_sessions and oauth_auth_requests back the PostgreSQL ClientAuthStore
 ```
+
+Applied migrations: 000001_create_users, 000002_create_templates, 000003_add_plan_to_users,
+000004_create_post_history, 000005_add_theme_to_users, 000006_add_avatar_to_users,
+000007_create_oauth_store.
 
 ---
 
 ## API Endpoints
 
 ### Auth
-| Method | Path                  | Description                          |
-|--------|-----------------------|--------------------------------------|
-| GET    | /auth/login           | Initiate AT Protocol OAuth PKCE flow |
-| GET    | /auth/callback        | OAuth callback, exchange code        |
-| POST   | /auth/logout          | Clear session                        |
+| Method | Path                   | Description                          |
+|--------|------------------------|--------------------------------------|
+| GET    | /auth/login            | Initiate AT Protocol OAuth PKCE flow |
+| GET    | /auth/callback         | OAuth callback, exchange code        |
+| POST   | /auth/logout           | Clear session                        |
+| GET    | /client-metadata.json  | OAuth client metadata                |
 
-### Templates (JSON API)
-| Method | Path                   | Description                 |
-|--------|------------------------|-----------------------------|
-| GET    | /api/templates         | List user's templates       |
-| POST   | /api/templates         | Create template             |
-| PUT    | /api/templates/:id     | Update template             |
-| DELETE | /api/templates/:id     | Delete template             |
-| PUT    | /api/templates/reorder | Update display order        |
+### Templates (JSON API, RequireAuth + operations rate limit)
+| Method | Path                   | Description                              |
+|--------|------------------------|------------------------------------------|
+| GET    | /api/templates         | List user's templates                    |
+| POST   | /api/templates         | Create (name ≤100, suffix ≤250 runes)    |
+| PUT    | /api/templates/:id     | Update (same validation, ownership check)|
+| DELETE | /api/templates/:id     | Delete (ownership check)                 |
+| PUT    | /api/templates/reorder | Update display order (transactional)     |
+| GET    | /api/composer/templates| Templates for composer dropdown          |
 
-### Post
-| Method | Path       | Description                              |
-|--------|------------|------------------------------------------|
-| POST   | /api/post  | Compose and submit post to Bluesky       |
+### Post (JSON API, RequireAuth + post rate limit 10/min)
+| Method | Path       | Description                                              |
+|--------|------------|----------------------------------------------------------|
+| POST   | /api/post  | Compose + submit. Body: text, template_id (optional),    |
+|        |            | reply_parent_uri/cid + reply_root_uri/cid (all-or-none)  |
 
-### Feed
-| Method | Path                  | Description                                        |
-|--------|-----------------------|----------------------------------------------------|
-| GET    | /api/feed/following   | User's Following feed (cursor-paginated)           |
-| GET    | /api/feed/hashtags    | Merged hashtag feed; accepts `tags` query param    |
-| GET    | /api/feed/recent-tags | Last 10 unique hashtags posted by the user         |
+### Likes (JSON API, RequireAuth + operations rate limit)
+| Method | Path       | Description                                  |
+|--------|------------|----------------------------------------------|
+| POST   | /api/like  | Like a post. Form data: uri, cid             |
+| DELETE | /api/like  | Unlike. Form/query: like_uri + post refs     |
 
-### Web UI (HTMX)
-| Method | Path           | Description                                          |
-|--------|----------------|------------------------------------------------------|
-| GET    | /              | Composer + template selector + feed                  |
-| GET    | /templates     | Template management page                             |
-| GET    | /settings      | Account settings (includes theme selector for paid)  |
+### Feed (JSON API, RequireAuth)
+| Method | Path                  | Description                                     |
+|--------|-----------------------|-------------------------------------------------|
+| GET    | /api/feed/following   | Following feed (cursor-paginated)               |
+| GET    | /api/feed/hashtags    | Merged hashtag feed; `tags` query param         |
+| GET    | /api/feed/recent-tags | Last 10 unique hashtags posted by the user      |
+
+### Web UI (RequireSession — redirects to /login; HTMX partials)
+| Method | Path             | Description                                     |
+|--------|------------------|-------------------------------------------------|
+| GET    | /                | Three-column layout, Following feed on load     |
+| GET    | /feed/following  | HTMX partial — Following feed                   |
+| GET    | /feed/hashtags   | HTMX partial — merged hashtag feed              |
+| GET    | /templates       | Template management page                        |
+| GET    | /settings        | Settings (page not yet built — priority item)   |
+| GET    | /login           | Login page (public; bounces if authed)          |
+
+### Infrastructure
+| Method | Path          | Description                                        |
+|--------|---------------|----------------------------------------------------|
+| GET    | /health       | Health check                                       |
+| GET    | /robots.txt   | Allows / and /login; disallows app routes          |
+| GET    | /favicon.svg  | SVG favicon (Deep Ocean palette); also /favicon.ico|
+
+A bare-domain middleware 301-redirects `draftsky.social` → `https://www.draftsky.social`
+(registered first on the engine).
 
 ---
 
 ## Project Structure
 
 ```
-drafsky/
+draftsky/
 ├── cmd/
 │   └── server/
 │       └── main.go
 ├── internal/
-│   ├── auth/          # AT Protocol OAuth handlers and token management
-│   ├── bluesky/       # indigo client wrapper, post construction, facets
-│   ├── feed/          # Following and hashtag feed clients
+│   ├── auth/          # AT Protocol OAuth handlers, session cookies, pgstore.go
+│   ├── bluesky/       # indigo wrapper: Post (with ReplyRefs), facets, ExtractHashtags
+│   ├── feed/          # Following + hashtag feed clients, PostView mapping
 │   ├── db/
 │   │   ├── queries/   # .sql files (sqlc source)
 │   │   └── sqlc/      # generated Go code (do not edit manually)
-│   ├── handlers/      # Gin route handlers
-│   ├── middleware/    # Auth middleware, session checking
+│   ├── handlers/      # Gin route handlers (JSON API + HTMX UI handlers)
+│   ├── middleware/    # RequireAuth (401 JSON), RequireSession (redirect),
+│   │                  # SecurityHeaders, rate limiters
 │   └── models/        # Shared types not generated by sqlc
 ├── migrations/        # golang-migrate SQL migration files
 ├── templates/         # Go html/template files (.html)
-├── static/            # CSS, minimal JS
+│   └── partials/      # HTMX partials (feed, composer, feed_controls, ...)
+├── static/            # style.css, app.js, favicon.svg
 ├── db/
 │   └── sqlc.yaml      # sqlc configuration
+├── Dockerfile         # multi-stage, CGO_ENABLED=0, bookworm-slim + ca-certificates
+├── railway.toml
 ├── CLAUDE.md
+├── DEPLOYMENT.md      # Railway runbook
 ├── go.mod
 └── go.sum
 ```
@@ -219,6 +276,8 @@ drafsky/
 - Use structured logging (log/slog, standard library) — no fmt.Println in handlers
 - Environment variables for all config (DSN, session secret, OAuth client ID, etc.)
 - Never hardcode credentials or secrets
+- Non-critical writes after a successful external action (e.g. post_history insert
+  after a Bluesky post) run in a detached goroutine — never fail the user action
 
 ### Naming
 - Handlers: `HandleGetTemplates`, `HandleCreateTemplate` etc. (Handle + HTTP verb + resource)
@@ -229,78 +288,137 @@ drafsky/
 - Always use parameterised queries (sqlc enforces this)
 - Migrations are sequential and never edited after creation — add a new migration to fix mistakes
 - The `did` column is the user identifier in all foreign key relationships, not `handle`
-- Pending migrations before UI work: `000004_create_post_history`, `000005_add_theme_to_users`
-
-**Known issues to fix in Session 8 (warm-up):**
-- Avatar not displaying in left rail — the `users` table has no `avatar` column. Fetch
-  the avatar URL from `app.bsky.actor.getProfile` in `HandleCallback` at login time and
-  store it on the user record. Add migration `000006_add_avatar_to_users.up.sql`:
-  `ALTER TABLE users ADD COLUMN avatar TEXT`. Pass it through `LayoutData` to the template.
-- Recent tags not populating — `post_history` did not exist when Session 5 ran, so
-  `HandleCreatePost` is not writing to it. Add the insert to `HandleCreatePost` after a
-  successful Bluesky post: extract hashtags from the combined text (reuse the regex from
-  `internal/bluesky/bluesky.go`), insert a `post_history` row with the URI and hashtags
-  array. Add a `CreatePostHistory` query to `internal/db/queries/users.sql` and
-  regenerate sqlc.
-
-**Beta release additions — also Session 8 scope:**
-- **Likes** — add a like/unlike toggle to each post card. `app.bsky.feed.like` record
-  creation via indigo. New endpoints: `POST /api/like` (create like) and
-  `DELETE /api/like` (remove like), both accepting `{uri, cid}`. The feed `PostView`
-  needs `LikedByMe bool` and `LikeURI string` fields so the toggle can reflect current
-  state and send the right request.
-- **Image display** — add to `PostView` in `internal/feed/feed.go`:
-  Images []PostImage with Thumb, Fullsize, Alt string fields.
-  Populate from app.bsky.embed.images#view in the feed mapping logic. Render images
-  in the feed template below post text, capped to card width, respecting aspect ratio.
 
 ### AT Protocol / Bluesky
 - Always use the indigo library for post construction — never build `app.bsky.feed.post`
   records manually
-- Token refresh must be handled transparently — check expiry before every API call
-- Respect Bluesky rate limits; surface errors clearly to the user rather than silently failing
+- Token refresh is transparent via `ResumeSession` (handles DPoP + refresh automatically)
+- Detect upstream Bluesky 429s (`bluesky.IsRateLimitError`) and surface a readable 429
+  to the client; never a generic 500
+- Respect Bluesky rate limits; surface errors clearly rather than silently failing
 
 ### HTMX
 - Partial templates live in `/templates/partials/`
 - HTMX responses return only the relevant partial, not a full page
 - Keep `hx-` attributes in the HTML; do not drive HTMX behaviour from JavaScript
+  (exception: `htmx.ajax()` for programmatic feed swaps in app.js)
+- JSON API handlers and HTMX handlers stay separate — never make a JSON endpoint
+  return HTML or vice versa
+
+### Security
+- Session cookies: HMAC-SHA256 signed, HttpOnly, Secure in production, SameSite=Lax,
+  constant-time comparison (`hmac.Equal`)
+- Security headers middleware on all routes (nosniff, frame deny, referrer policy, CSP
+  with 'unsafe-inline' — TODO: migrate to nonces)
+- Rate limits: 10/min per DID on posting; 60/min per DID on likes + template CRUD;
+  429 + Retry-After on breach
+- Server-side validation is the enforcement; JS counters are UX only
+- Ownership verification on every template mutation (user_id in the query)
+
+---
+
+## Gotchas (hard-won — read before writing code)
+
+1. **`#ZgotmplZ` on AT URIs in data attributes.** Go's html/template `attrType()`
+   strips the `data-` prefix from custom attributes and treats any remaining name
+   containing "uri"/"url"/"src" as a URL context. `at://` is not an allowlisted scheme,
+   so the value is replaced with `#ZgotmplZ`. Fix: the `safeAtURI` template function —
+   validates against `^at://[a-zA-Z0-9:._/\-]+$` and returns `template.URL`. Only ever
+   use it for validated AT URIs, never arbitrary content. (`hx-vals` is immune — it's
+   classified contentTypePlain.)
+2. **HTMX sends form data, not JSON.** `hx-post` sends
+   `application/x-www-form-urlencoded`; `hx-delete` may use query params. Use
+   `c.PostForm()` / `c.Query()` in HTMX-triggered handlers — `c.ShouldBindJSON` returns
+   400 and HTMX silently discards the response.
+3. **sqlc + `unnest()`.** Set-returning functions need an explicit cast
+   (`tag::text AS tag`) or sqlc generates `interface{}`.
+4. **Trailing newlines are semantic in the composer.** `submitPost()` uses
+   `.trimStart()`, never `.trim()` — trailing newlines control where the template
+   suffix lands. Server-side, normalise `\r\n` → `\n` before the suffix separator check
+   in `Post()`. `updateCounter()` in app.js mirrors the same separator logic.
+5. **Escaping order in `highlightHashtags`.** Run the hashtag regex on plain text, then
+   escape each segment individually. Escaping first corrupts offsets and double-escapes
+   (`'` → `&#39;` rendered literally).
+6. **Facet byte offsets are UTF-8 bytes.** `FindAllStringSubmatchIndex` already returns
+   byte indices; never convert through rune positions. Emoji will corrupt facets otherwise.
+7. **Character counting is graphemes.** Bluesky counts graphemes; use `Intl.Segmenter`
+   (with fallback) in JS so DraftSky's counter agrees with the platform.
+8. **Railway's variable UI can display values incorrectly** (phantom backticks). Use
+   the Raw Editor to verify what's actually stored.
+9. **Empty slices, not nil.** JSON list responses initialise as
+   `make([]T, len(rows))` / `[]T{}` so clients receive `[]`, never `null`.
+10. **Hard-refresh after JS changes.** Browsers cache app.js aggressively; a "fix that
+    didn't work" is often a cached file. Cmd+Shift+R before debugging further.
+11. **CNAME can't sit on a root domain** (Hover has no ALIAS). Root domain points an
+    A record at Railway's IP; the Go middleware handles the www redirect. Hover's
+    forward service doesn't do HTTPS and proved unreliable.
+12. **Gin route ordering.** Static segments must be registered before parameterised
+    ones (`/api/templates/reorder` before `/api/templates/:id`).
 
 ---
 
 ## Environment Variables
 
 ```
-DATABASE_URL        PostgreSQL DSN
-SESSION_SECRET      Random 32-byte secret for session signing
-OAUTH_CLIENT_ID     AT Protocol OAuth client ID
-OAUTH_REDIRECT_URL  Full callback URL (e.g. https://drafts.ky/auth/callback)
+DATABASE_URL        PostgreSQL DSN (Railway-injected in production)
+SESSION_SECRET      Random 32-byte secret for session signing (openssl rand -hex 32)
+OAUTH_CLIENT_ID     https://www.draftsky.social/client-metadata.json (production)
+OAUTH_REDIRECT_URL  https://www.draftsky.social/auth/callback (production)
 APP_ENV             development | production
 PORT                HTTP listen port (default 8080)
 ```
 
----
-
-## Phases
-
-| Phase | Scope                                                                               |
-|-------|-------------------------------------------------------------------------------------|
-| 1     | Core API + AT Protocol OAuth + Go/HTMX web UI + Following feed + merged hashtag feed |
-| 2 (Beta) | Hardening + likes + image display in feed. Beta release to friends.            |
-| 3 (General release) | Replies (with correct AT Protocol threading) + reposts + tabbed hashtag feed toggle |
-| 4     | SwiftUI iOS app (same /api/* endpoints)                                             |
-| 5     | Photo posting (blob upload), template sharing, starter template packs               |
+Local dev: no OAUTH_CLIENT_ID → localhost OAuth config; use `http://127.0.0.1:8080`
+(not `localhost` — RFC 8252 requires a loopback IP in the redirect URI). Local DB runs
+in Docker (`docker start draftsky-dev-db`).
 
 ---
 
-## Key Dependencies
+## Status & Roadmap
 
-```
-github.com/gin-gonic/gin
-github.com/jackc/pgx/v5
-github.com/bluesky-social/indigo
-github.com/golang-migrate/migrate/v4
-sqlc (CLI tool — see https://sqlc.dev)
-```
+### Shipped (live at www.draftsky.social, private beta)
+- AT Protocol OAuth login, PostgreSQL-backed OAuth store
+- Template CRUD with validation (100/250 rune limits) + live character counters
+- Posting with template suffix, correct facets, newline-aware suffix placement
+- Following feed + merged hashtag feed + recent-tags rail + infinite scroll
+- Likes (with viewer state), image embeds, external link cards, avatars
+- Replies with correct AT Protocol threading (root/parent), reply preview in composer
+- Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
+- Security headers, robots.txt, favicon, tiered rate limiting
+- Railway deployment, custom domain, bare-domain 301 redirect
+
+### Current priority order
+1. **Reposts** — `app.bsky.feed.repost` toggle alongside likes
+2. **Saved feeds (read-only)** — fetch the user's pinned/saved feeds; tabs across the
+   top of the centre column (Bluesky-style) to switch between them, alongside
+   Following and hashtag feeds
+3. **CSRF protection** — tokens on all state-mutating endpoints
+4. **Settings page + theme selector** — page scaffold; theme switching for paid users
+   (server-side plan check; validate theme key against allowlist)
+5. **Free tier enforcement** — 5-template limit, `RequirePaidPlan` middleware; scope
+   trusted proxies to Railway's CIDR
+
+### Post-GA / longer term
+- **Post context indicators in feed** — distinguish posts, replies, and reposts on
+  each card: "Replying to @handle" line for replies (from the post's `reply` context),
+  "Reposted by X" attribution for reposts (from the timeline item's `reason` field,
+  `app.bsky.feed.defs#reasonRepost`). The natural time to add repost attribution is
+  the reposts session (priority item 1), since that work touches the same feed mapping.
+- Notifications (listNotifications) + unread badge
+- Own profile view/edit; other user profiles (getProfile, getAuthorFeed)
+- Thread view (getPostThread)
+- Search (searchPosts, searchActors)
+- Bookmarks (local until AT Protocol supports natively)
+- Photo posting (uploadBlob)
+- Direct messages (chat.bsky.convo.* — complex, separate proxy infrastructure)
+- Tabbed (per-hashtag) feed view as alternative to merged
+- iOS app (SwiftUI, same /api/* endpoints, feature parity)
+- Template sharing / starter packs
+
+### Technical debt
+- CSP uses 'unsafe-inline' — migrate to nonces
+- Rate limiter sync.Map grows unbounded — needs cleanup or Redis at scale
+- Trusted proxies at 0.0.0.0/0 pending Railway CIDR scoping
 
 ---
 
@@ -313,33 +431,34 @@ Three-column layout matching the Bluesky/Twitter convention:
 ┌──────────────┬─────────────────────┬──────────────┐
 │   Left Rail  │     Centre Feed     │  Right Rail  │
 │              │                     │              │
-│  Avatar      │  [post cards]       │ Recent Tags  │
-│  Handle      │                     │ #NJDevils    │
-│  Home        │                     │ #NHL         │
-│  Templates   │                     │ #motosky     │
-│  Settings    │                     │ ...          │
-│  Logout      │                     │              │
-│              │                     │              │
+│  Avatar      │  [feed controls]    │ Recent Tags  │
+│  Handle      │  [post cards]       │ #NJDevils    │
+│  ─────────   │                     │ #NHL         │
+│  Home        │                     │ #motosky     │
+│  Templates   │                     │ ...          │
+│  Settings    │                     │              │
+│  ─────────   │                     │              │
 │  [New Post]  │                     │              │
+│  Sign out    │                     │              │
 └──────────────┴─────────────────────┴──────────────┘
 ```
 
-- **Left rail:** Avatar, handle, nav links, New Post button at the bottom of the nav
-- **Centre feed:** Following feed on load; switches to merged hashtag feed after posting
-- **Right rail:** Last 10 unique hashtags the authenticated user has personally posted,
-  pulled from `post_history`, ordered by most recently used. Fewer than 10 shown if the
-  user hasn't posted 10 distinct hashtags yet.
+- **Left rail:** avatar, handle, nav links, divider, New Post button, Sign out
+- **Centre feed:** Following feed on load; feed controls partial shows active feed
+  (Following vs "Hashtag Feed: #x #y") with Back to Following when applicable
+- **Right rail:** last 10 unique hashtags the user has posted (from `post_history`),
+  most recent first; clicking one switches the centre feed
+- **Responsive:** max-width 1280px centred; right rail hides below 600px; left rail
+  collapses to icon strip below 480px
 
-### Composer (modal/popup)
-Triggered by the New Post button. Modelled on the Bluesky compose modal:
-- User avatar top-left
-- Text area with placeholder
-- Template selector dropdown (replaces the "Anyone can interact" area from Bluesky)
-- Character counter (300 limit)
-- Post button top-right
-- Cancel top-left
+### Composer (modal)
+- Avatar, textarea ("What's up?" / "Write your reply" in reply mode)
+- Reply mode: compact preview (author + ~100 chars) of the post being replied to
+- Template selector dropdown with suffix preview below the textarea
+- Grapheme-accurate character counter (300 limit, counts body + suffix + separator)
+- Post button (disabled when over limit or empty), Cancel, Escape/overlay to close
 
-### Colour Palette — Deep Ocean
+### Colour Palette — Deep Ocean (default)
 
 | Role         | Hex       | Usage                                      |
 |--------------|-----------|--------------------------------------------|
@@ -351,13 +470,13 @@ Triggered by the New Post button. Modelled on the Bluesky compose modal:
 | Muted        | `#4b6080` | Secondary text, timestamps, labels         |
 
 CSS variables must be used throughout — never hardcode hex values in component styles.
-Define all colours in a `:root {}` block in `/static/style.css`.
+All colours are defined in the `:root {}` block in `/static/style.css`.
 
 ### Themes
 
 Themes are sets of CSS variable overrides. The user's theme is injected as a class on
-the `<body>` tag by the Go template, based on the `theme` column in the `users` table.
-Free users are locked to `ocean`. Paid users can select any theme from their settings.
+the `<body>` tag by the Go template, based on the `theme` column. Free users are locked
+to `ocean`; paid users can select any theme (settings page — pending).
 
 | Theme key  | Name              | Plan     | Accent    | Base                    |
 |------------|-------------------|----------|-----------|-------------------------|
@@ -367,16 +486,15 @@ Free users are locked to `ocean`. Paid users can select any theme from their set
 | `graphite` | Graphite & Sky    | Paid     | `#38bdf8` | `#131416` / `#1c1f23`  |
 
 **Implementation rules:**
-- `/static/style.css` defines `:root` with the `ocean` defaults
-- Each paid theme is a `body.slate { }`, `body.amber { }`, `body.graphite { }` block
-  that overrides only the CSS variables that differ
-- The base Go layout template sets `<body class="{{ .User.Theme }}">`
-- A free user whose `theme` column is somehow set to a paid theme must fall back to
-  `ocean` — enforce this in the template data layer, not in CSS
-- Adding a new theme in future requires only a new CSS block and a new row in this table
+- `:root` holds the `ocean` defaults; `body.slate {}`, `body.amber {}`,
+  `body.graphite {}` override only what differs
+- A free user whose `theme` column is somehow a paid theme falls back to `ocean` —
+  enforced in the template data layer (`buildLayoutBase`), not in CSS
+- Theme keys from clients are validated against the allowlist server-side
+- Adding a theme = one CSS block + one row in this table
 
 ### Typography
-System font stack — no external font dependencies for v1.
+System font stack — no external font dependencies.
 
 ---
 
@@ -384,24 +502,17 @@ System font stack — no external font dependencies for v1.
 
 DraftSky uses a freemium model on web and an ad-supported + one-time purchase model on iOS.
 
-**Web (future):**
-- Free tier: up to 5 templates, Following feed, basic posting, Ocean theme only
-- Paid tier: unlimited templates, tabbed hashtag feed (Phase 2), all themes
-- Enforced via the `plan` column on the `users` table
+**Web:**
+- Free tier: up to 5 templates, Following feed, posting, replies, Ocean theme only
+- Paid tier: unlimited templates, all themes, tabbed hashtag feed (future)
+- Enforced via the `plan` column (enforcement pending — priority item 5)
 
-**iOS (Phase 3):**
-- Ads shown by default (AdMob or equivalent)
-- Non-consumable IAP via StoreKit 2 to remove ads permanently
-- Purchase is tied to the user's DID, not the device — buying on iOS sets `plan = 'paid'`
-  server-side, removing ads on both iOS and web
-- **Server-side Apple receipt verification is mandatory** — never trust the client to
-  self-report a successful purchase. Verify via Apple's API before updating `plan`
-- Apple Small Business Program (15% vs 30% cut) — apply at launch
-
-**Architecture note:**
-The `plan` column is already in the schema. No handler currently checks it — add
-enforcement when freemium tiers are introduced. A middleware helper `RequirePaidPlan`
-should be added at that point, following the same pattern as `RequireAuth`.
+**iOS (future):**
+- Ads by default (AdMob or equivalent); non-consumable IAP via StoreKit 2 removes them
+- Purchase tied to the user's DID, not the device — buying on iOS sets `plan = 'paid'`
+  server-side, upgrading web too
+- **Server-side Apple receipt verification is mandatory** — never trust the client
+- Apple Small Business Program (15% vs 30%) — apply at launch
 
 ---
 
@@ -410,76 +521,18 @@ should be added at that point, following the same pattern as `RequireAuth`.
 - Multi-platform support (Mastodon, Threads etc.) — Bluesky only
 - Scheduling posts
 - Analytics or engagement tracking
-- Team/shared template libraries (Phase 5 consideration)
-- Dark mode (add later — ship first)
-- Photo posting (Phase 5 — requires blob upload via `com.atproto.repo.uploadBlob`)
-
-## Roadmap
-
-### Beta release — Session 8 scope additions
-Beyond hardening, Session 8 adds:
-- **Likes** — `app.bsky.feed.like` record creation. Single API call, like/unlike toggle
-  on each post card in the feed.
-- **Image display** — `PostView` needs an `Embed` field to capture image URLs from
-  `app.bsky.feed.defs#imageView`. Feed template renders attached images below post text.
-  Respect aspect ratios; cap display width to the card width.
-
-### General release additions
-- **Replies** — reply mode in the composer. AT Protocol requires both `reply.root` and
-  `reply.parent` references to be set correctly on the post record. The root is the
-  original post in the thread; the parent is the post being directly replied to. Both
-  are `{uri, cid}` pairs. The composer needs a reply context state (triggered by clicking
-  Reply on a post card) that passes these references through to `HandleCreatePost`.
-- **Reposts** — `app.bsky.feed.repost` record. Simple toggle like likes.
-
-### Phase 4 — iOS app
-SwiftUI app consuming the same `/api/*` endpoints. All features available on web
-should be available on iOS at parity.
+- Team/shared template libraries
+- Photo posting (requires blob upload — on the long-term roadmap)
 
 ---
 
-## Full Client Roadmap
+## Key Dependencies
 
-DraftSky's long-term goal is to be a complete Bluesky client replacement on both web
-and iOS. The following features are required to achieve that, roughly in priority order:
-
-### GA blockers (before public launch)
-- **Replies** — composer reply mode with correct AT Protocol threading (`reply.root`
-  and `reply.parent` references, both `{uri, cid}` pairs)
-- **Reposts** — `app.bsky.feed.repost` record, simple toggle alongside likes
-- **Settings page** — currently nav link goes nowhere; needed for theme selector
-- **Theme selector** — paid users can select from the four themes on settings page
-- **www redirect** — `draftsky.social` → `https://www.draftsky.social` at root
-- **robots.txt** — reduce scanner noise in logs
-- **Favicon** — currently 404ing
-
-### Post-GA / Phase 3 priorities
-- **Saved feeds** — fetch and display the user's pinned/saved feeds from
-  `app.bsky.feed.getSavedFeeds`; allow switching between them in the centre column
-  alongside Following and hashtag feeds
-- **Notifications** — `app.bsky.notification.listNotifications`; notification feed
-  view and unread count badge in the left rail
-- **Own profile view and edit** — view own posts, followers, following count;
-  edit display name, description, avatar via `com.atproto.repo.putRecord`
-- **Other user profiles** — click on a handle/avatar to view their profile and posts
-  via `app.bsky.actor.getProfile` and `app.bsky.feed.getAuthorFeed`
-- **Free tier enforcement** — 5 template limit for free users; `RequirePaidPlan`
-  middleware for theme enforcement
-
-### Phase 4 and beyond
-- **Bookmarks** — Bluesky doesn't have native bookmarks yet; track locally in
-  `post_history` or a new `bookmarks` table until AT Protocol supports it natively
-- **Direct messages** — `chat.bsky.convo.*` lexicon; significantly more complex than
-  other features, requires separate chat proxy infrastructure
-- **Photo posting** — blob upload via `com.atproto.repo.uploadBlob`, attach to post
-  record
-- **Thread view** — clicking a post expands the full thread via
-  `app.bsky.feed.getPostThread`
-- **Search** — full text and user search via `app.bsky.feed.searchPosts` and
-  `app.bsky.actor.searchActors`
-
-### Technical debt to resolve
-- Trusted proxies scoped to Railway's actual CIDR instead of `0.0.0.0/0`
-- Rate limiter `sync.Map` grows unbounded — acceptable for now, needs Redis or
-  periodic cleanup at scale
-- MemStore note: already replaced with PostgreSQL store in Session 8
+```
+github.com/gin-gonic/gin
+github.com/jackc/pgx/v5
+github.com/bluesky-social/indigo
+github.com/golang-migrate/migrate/v4
+golang.org/x/time/rate
+sqlc (CLI tool — see https://sqlc.dev)
+```

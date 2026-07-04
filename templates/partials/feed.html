@@ -78,7 +78,15 @@
         {{end}}
     </div>
     <div class="post-meta">
-        {{if .ReplyCount}}<span class="post-count post-count-reply">{{formatCount .ReplyCount}}</span>{{end}}
+        <span class="post-count post-count-reply"
+              data-uri="{{safeAtURI .URI}}"
+              data-cid="{{.CID}}"
+              data-root-uri="{{safeAtURI .ReplyRootURI}}"
+              data-root-cid="{{.ReplyRootCID}}"
+              data-author="{{.Author.Handle}}"
+              data-text="{{.Text}}"
+              onclick="openComposerReply(this)"
+              title="Reply">{{formatCount .ReplyCount}}</span>
         {{if .RepostCount}}<span class="post-count post-count-repost">{{formatCount .RepostCount}}</span>{{end}}
         {{template "like-button" .}}
     </div>

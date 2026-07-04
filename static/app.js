@@ -9,16 +9,56 @@ function graphemeLength(str) {
 
 // --- Composer modal ---
 
-function openComposer() {
+// Holds reply context when the composer is open in reply mode; null otherwise.
+let replyContext = null;
+
+// openComposer opens the composer. Pass a reply context object to enter reply mode:
+//   { uri, cid, rootUri, rootCid, authorHandle, text }
+// Call with no argument (or null) for a normal post.
+function openComposer(ctx) {
+    replyContext = ctx || null;
+
+    const textarea = document.getElementById('composer-textarea');
+    const replyDiv = document.getElementById('composer-reply-context');
+
+    if (replyContext) {
+        document.getElementById('reply-context-author').textContent = '@' + replyContext.authorHandle;
+        const preview = replyContext.text.length > 100
+            ? replyContext.text.slice(0, 100) + '…'
+            : replyContext.text;
+        document.getElementById('reply-context-text').textContent = preview;
+        replyDiv.style.display = 'block';
+        textarea.placeholder = 'Write your reply…';
+    } else {
+        replyDiv.style.display = 'none';
+        textarea.placeholder = "What’s up?";
+    }
+
     document.getElementById('composer-overlay').style.display = 'flex';
-    document.getElementById('composer-textarea').focus();
+    textarea.focus();
     loadComposerTemplates();
     updateCounter();
 }
 
+// openComposerReply reads reply data from a post card element's data-* attributes
+// and opens the composer in reply mode.
+function openComposerReply(el) {
+    openComposer({
+        uri:          el.dataset.uri,
+        cid:          el.dataset.cid,
+        rootUri:      el.dataset.rootUri,
+        rootCid:      el.dataset.rootCid,
+        authorHandle: el.dataset.author,
+        text:         el.dataset.text,
+    });
+}
+
 function closeComposer() {
+    replyContext = null;
     document.getElementById('composer-overlay').style.display = 'none';
     document.getElementById('composer-textarea').value = '';
+    document.getElementById('composer-textarea').placeholder = "What’s up?";
+    document.getElementById('composer-reply-context').style.display = 'none';
     document.getElementById('template-select').selectedIndex = 0;
     document.getElementById('suffix-preview').style.display = 'none';
     document.getElementById('suffix-preview').textContent = '';
@@ -101,6 +141,17 @@ async function submitPost() {
         body.template_id = parseInt(opt.value, 10);
     }
 
+    // Attach reply refs when the composer is in reply mode.
+    const isReply = !!replyContext;
+    if (replyContext) {
+        const rootUri = replyContext.rootUri || replyContext.uri;
+        const rootCid = replyContext.rootCid || replyContext.cid;
+        body.reply_parent_uri = replyContext.uri;
+        body.reply_parent_cid = replyContext.cid;
+        body.reply_root_uri   = rootUri;
+        body.reply_root_cid   = rootCid;
+    }
+
     const btn = document.getElementById('composer-post-btn');
     btn.disabled = true;
     btn.textContent = 'Posting…';
@@ -120,7 +171,7 @@ async function submitPost() {
                 : [];
             closeComposer();
             if (typeof htmx !== 'undefined') {
-                htmx.trigger(document.body, 'postSubmitted', { uri: data.uri, hashtags });
+                htmx.trigger(document.body, 'postSubmitted', { uri: data.uri, hashtags, isReply });
             }
         } else {
             const data = await res.json().catch(() => ({}));
@@ -319,13 +370,27 @@ async function saveReorder() {
 
 // --- Feed switching ---
 
+// Tracks the URL of the currently displayed feed so reply-without-hashtags
+// can refresh the same feed rather than jumping to Following.
+let currentFeedURL = '/feed/following';
+
 function switchToHashtagFeed(tags) {
-    const feedURL = (tags && tags.length > 0)
+    currentFeedURL = (tags && tags.length > 0)
         ? '/feed/hashtags?tags=' + tags.map(encodeURIComponent).join(',')
         : '/feed/following';
-    htmx.ajax('GET', feedURL, { target: '#feed-root', swap: 'innerHTML' });
+    htmx.ajax('GET', currentFeedURL, { target: '#feed-root', swap: 'innerHTML' });
 }
 
 document.body.addEventListener('postSubmitted', function(evt) {
-    switchToHashtagFeed(evt.detail.hashtags);
+    const { hashtags, isReply } = evt.detail;
+    if (hashtags && hashtags.length > 0) {
+        // Post (or reply) with hashtags — switch to merged hashtag feed.
+        switchToHashtagFeed(hashtags);
+    } else if (isReply) {
+        // Reply without hashtags — refresh wherever the user currently is.
+        htmx.ajax('GET', currentFeedURL, { target: '#feed-root', swap: 'innerHTML' });
+    } else {
+        // Regular post with no hashtags — go to Following feed.
+        switchToHashtagFeed([]);
+    }
 });

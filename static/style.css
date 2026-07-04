@@ -444,6 +444,15 @@ button {
 .post-count-reply::before  { content: '↩ '; }
 .post-count-repost::before { content: '↻ '; }
 
+.post-count-reply {
+    cursor: pointer;
+    transition: color 0.1s;
+}
+
+.post-count-reply:hover {
+    color: var(--color-accent);
+}
+
 .post-count-like {
     transition: color 0.1s;
 }
@@ -662,6 +671,27 @@ button {
 }
 
 .composer-textarea::placeholder {
+    color: var(--color-muted);
+}
+
+.composer-reply-context {
+    margin: 0 0 12px 50px;
+    padding: 8px 12px;
+    border-left: 3px solid var(--color-muted);
+    background: var(--color-card);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.reply-context-author {
+    font-weight: 600;
+    color: var(--color-accent);
+    margin-right: 6px;
+}
+
+.reply-context-text {
     color: var(--color-muted);
 }
 

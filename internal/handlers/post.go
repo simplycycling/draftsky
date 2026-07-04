@@ -40,8 +40,12 @@ func (h *PostHandler) limiterFor(did string) *rate.Limiter {
 }
 
 type createPostRequest struct {
-	Text       string `json:"text"        binding:"required"`
-	TemplateID *int32 `json:"template_id"`
+	Text           string `json:"text"             binding:"required"`
+	TemplateID     *int32 `json:"template_id"`
+	ReplyParentURI string `json:"reply_parent_uri"`
+	ReplyParentCID string `json:"reply_parent_cid"`
+	ReplyRootURI   string `json:"reply_root_uri"`
+	ReplyRootCID   string `json:"reply_root_cid"`
 }
 
 type createPostResponse struct {
@@ -96,7 +100,24 @@ func (h *PostHandler) HandleCreatePost(c *gin.Context) {
 		suffix = tmpl.Suffix
 	}
 
-	result, err := h.poster.Post(c.Request.Context(), did, sessionID, req.Text, suffix)
+	// Validate reply refs: either all four are present or none are.
+	hasAny := req.ReplyParentURI != "" || req.ReplyParentCID != "" || req.ReplyRootURI != "" || req.ReplyRootCID != ""
+	hasAll := req.ReplyParentURI != "" && req.ReplyParentCID != "" && req.ReplyRootURI != "" && req.ReplyRootCID != ""
+	if hasAny && !hasAll {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reply requires all four fields: reply_parent_uri, reply_parent_cid, reply_root_uri, reply_root_cid"})
+		return
+	}
+	var replyRefs *bluesky.ReplyRefs
+	if hasAll {
+		replyRefs = &bluesky.ReplyRefs{
+			ParentURI: req.ReplyParentURI,
+			ParentCID: req.ReplyParentCID,
+			RootURI:   req.ReplyRootURI,
+			RootCID:   req.ReplyRootCID,
+		}
+	}
+
+	result, err := h.poster.Post(c.Request.Context(), did, sessionID, req.Text, suffix, replyRefs)
 	if err != nil {
 		if bluesky.IsRateLimitError(err) {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Bluesky is rate limiting your account — try again shortly."})

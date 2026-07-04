@@ -47,10 +47,21 @@ type PostResult struct {
 	CID string
 }
 
+// ReplyRefs carries the AT Protocol strong-ref pairs required to thread a reply.
+// For a reply to a top-level post, Root and Parent point to the same post.
+// For a reply to a reply, Parent is the direct parent and Root is the thread root.
+type ReplyRefs struct {
+	ParentURI string
+	ParentCID string
+	RootURI   string
+	RootCID   string
+}
+
 // Post submits a post to Bluesky on behalf of the user identified by did/sessionID.
 // If suffix is non-empty it is appended to text with a space separator.
 // Hashtags in the final text are detected and annotated as richtext facets.
-func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix string) (*PostResult, error) {
+// If reply is non-nil the post is submitted as a reply with the given thread refs.
+func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix string, reply *ReplyRefs) (*PostResult, error) {
 	did, err := syntax.ParseDID(didStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid DID %q: %w", didStr, err)
@@ -79,6 +90,19 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 		Text:      fullText,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		Facets:    facets,
+	}
+
+	if reply != nil {
+		post.Reply = &appbsky.FeedPost_ReplyRef{
+			Root: &comatproto.RepoStrongRef{
+				Uri: reply.RootURI,
+				Cid: reply.RootCID,
+			},
+			Parent: &comatproto.RepoStrongRef{
+				Uri: reply.ParentURI,
+				Cid: reply.ParentCID,
+			},
+		}
 	}
 
 	apiClient := sess.APIClient()

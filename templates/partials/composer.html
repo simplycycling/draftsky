@@ -7,6 +7,11 @@
             <button type="button" id="composer-post-btn" class="btn-post" onclick="submitPost()" disabled>Post</button>
         </div>
 
+        <div id="composer-reply-context" class="composer-reply-context" style="display:none">
+            <span id="reply-context-author" class="reply-context-author"></span>
+            <span id="reply-context-text" class="reply-context-text"></span>
+        </div>
+
         <div class="composer-body">
             <div class="composer-avatar">
                 {{if .User.Avatar}}

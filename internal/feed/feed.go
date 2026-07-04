@@ -51,6 +51,11 @@ type PostView struct {
 	LikeURI      string            `json:"like_uri,omitempty"`
 	Images       []PostImage       `json:"images,omitempty"`
 	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
+	// ReplyRootURI / ReplyRootCID are populated from the post's own reply.root when
+	// the post is itself a reply. Empty for top-level posts. Used by the composer
+	// reply mode to thread replies to the correct thread root.
+	ReplyRootURI string `json:"reply_root_uri,omitempty"`
+	ReplyRootCID string `json:"reply_root_cid,omitempty"`
 }
 
 // FeedPage is a page of posts with an optional cursor for the next page.
@@ -260,6 +265,10 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 	if pv.Record != nil {
 		if fp, ok := pv.Record.Val.(*appbsky.FeedPost); ok {
 			v.Text = fp.Text
+			if fp.Reply != nil && fp.Reply.Root != nil {
+				v.ReplyRootURI = fp.Reply.Root.Uri
+				v.ReplyRootCID = fp.Reply.Root.Cid
+			}
 		}
 	}
 

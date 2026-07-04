@@ -26,6 +26,23 @@ const uiFeedLimit = 20
 
 var uiHashtagRe = regexp.MustCompile(`#[^\s#<>&"']+`)
 
+// atURIRe matches valid AT Protocol URIs (at://did/collection/rkey).
+// Used by safeAtURI to gate what we mark as template.URL.
+var atURIRe = regexp.MustCompile(`^at://[a-zA-Z0-9:._/\-]+$`)
+
+// safeAtURI validates that uri is a well-formed AT URI (or empty string,
+// used for top-level posts where ReplyRootURI is unset) and returns it
+// as template.URL so html/template does not apply URL-scheme filtering.
+// Go's template engine classifies data-*uri* attributes as URL context and
+// rejects at:// (not an approved scheme) with #ZgotmplZ; this function is
+// the narrow bypass, applied only after format validation.
+func safeAtURI(uri string) template.URL {
+	if uri == "" || atURIRe.MatchString(uri) {
+		return template.URL(uri)
+	}
+	return template.URL("")
+}
+
 // PageUser is the user representation passed to all page templates.
 type PageUser struct {
 	DID    string
@@ -69,6 +86,8 @@ type UIHandler struct {
 // treat this as fatal at startup.
 func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (*UIHandler, error) {
 	funcMap := template.FuncMap{
+		// safeAtURI validates and marks an AT Protocol URI safe for URL-context attributes.
+		"safeAtURI": safeAtURI,
 		// highlightHashtags wraps hashtag tokens in a styled span.
 		// Runs the regex on plain text so that apostrophes and other punctuation
 		// are detected correctly, then escapes each segment exactly once before
