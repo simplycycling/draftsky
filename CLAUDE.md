@@ -388,25 +388,26 @@ in Docker (`docker start draftsky-dev-db`).
 - Railway deployment, custom domain, bare-domain 301 redirect
 
 ### Current priority order
-1. **Reposts** — `app.bsky.feed.repost` toggle alongside likes
-2. **Saved feeds (read-only)** — fetch the user's pinned/saved feeds; tabs across the
+1. **Reposts** — `app.bsky.feed.repost` toggle alongside likes, plus "Reposted by X"
+   attribution on feed cards (from the timeline item's `reason` field,
+   `app.bsky.feed.defs#reasonRepost` — same feed-mapping code, same session)
+2. **Reply context + thread view** — "Replying to @handle" label on reply cards (from
+   the post's `reply` context); clicking a post opens the full thread view via
+   `app.bsky.feed.getPostThread` (root → intermediate replies → the clicked post and
+   its replies), Bluesky-style. New route/view; also delivers "click any post to see
+   its replies" for free.
+3. **Saved feeds (read-only)** — fetch the user's pinned/saved feeds; tabs across the
    top of the centre column (Bluesky-style) to switch between them, alongside
    Following and hashtag feeds
-3. **CSRF protection** — tokens on all state-mutating endpoints
-4. **Settings page + theme selector** — page scaffold; theme switching for paid users
+4. **CSRF protection** — tokens on all state-mutating endpoints
+5. **Settings page + theme selector** — page scaffold; theme switching for paid users
    (server-side plan check; validate theme key against allowlist)
-5. **Free tier enforcement** — 5-template limit, `RequirePaidPlan` middleware; scope
+6. **Free tier enforcement** — 5-template limit, `RequirePaidPlan` middleware; scope
    trusted proxies to Railway's CIDR
 
 ### Post-GA / longer term
-- **Post context indicators in feed** — distinguish posts, replies, and reposts on
-  each card: "Replying to @handle" line for replies (from the post's `reply` context),
-  "Reposted by X" attribution for reposts (from the timeline item's `reason` field,
-  `app.bsky.feed.defs#reasonRepost`). The natural time to add repost attribution is
-  the reposts session (priority item 1), since that work touches the same feed mapping.
 - Notifications (listNotifications) + unread badge
 - Own profile view/edit; other user profiles (getProfile, getAuthorFeed)
-- Thread view (getPostThread)
 - Search (searchPosts, searchActors)
 - Bookmarks (local until AT Protocol supports natively)
 - Photo posting (uploadBlob)
