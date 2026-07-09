@@ -406,6 +406,10 @@ in Docker (`docker start draftsky-dev-db`).
    trusted proxies to Railway's CIDR
 
 ### Post-GA / longer term
+- **Hashtag context menu** — Bluesky-style popover on hashtag click/long-press:
+  "See #tag posts" (existing hashtag feed), "See #tag posts by user" (needs author
+  feeds), "Mute #tag" (needs a mutes table + feed filtering). Deferred until
+  profiles/author feeds exist; plain click switches to the hashtag feed until then.
 - Notifications (listNotifications) + unread badge
 - Own profile view/edit; other user profiles (getProfile, getAuthorFeed)
 - Search (searchPosts, searchActors)

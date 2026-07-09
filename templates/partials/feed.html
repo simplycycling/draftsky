@@ -1,37 +1,3 @@
-{{define "repost-button"}}
-<span id="repost-{{.URI | printf "%s"}}"
-      class="post-count post-count-repost{{if .RepostedByMe}} reposted{{end}}"
-      hx-target="closest .post-count-repost"
-      hx-swap="outerHTML"
-      {{if .RepostedByMe}}
-      hx-delete="/api/repost"
-      hx-vals='{"repost_uri": "{{.RepostURI}}", "post_uri": "{{.URI}}", "post_cid": "{{.CID}}", "count": "{{.RepostCount}}"}'
-      {{else}}
-      hx-post="/api/repost"
-      hx-vals='{"uri": "{{.URI}}", "cid": "{{.CID}}", "count": "{{.RepostCount}}"}'
-      {{end}}
-      hx-trigger="click"
-      style="cursor:pointer"
-      title="{{if .RepostedByMe}}Undo repost{{else}}Repost{{end}}">{{formatCount .RepostCount}}</span>
-{{end}}
-
-{{define "like-button"}}
-<span id="like-{{.URI | printf "%s"}}"
-      class="post-count post-count-like{{if .LikedByMe}} liked{{end}}"
-      hx-target="closest .post-count-like"
-      hx-swap="outerHTML"
-      {{if .LikedByMe}}
-      hx-delete="/api/like"
-      hx-vals='{"uri": "{{.LikeURI}}", "post_uri": "{{.URI}}", "post_cid": "{{.CID}}", "count": "{{.LikeCount}}"}'
-      {{else}}
-      hx-post="/api/like"
-      hx-vals='{"uri": "{{.URI}}", "cid": "{{.CID}}", "count": "{{.LikeCount}}"}'
-      {{end}}
-      hx-trigger="click"
-      style="cursor:pointer"
-      title="{{if .LikedByMe}}Unlike{{else}}Like{{end}}">{{formatCount .LikeCount}}{{if .LikedByMe}}♥{{else}}♡{{end}}</span>
-{{end}}
-
 {{define "feed"}}
 {{template "feed-controls" .}}
 {{if .FeedPage}}
@@ -53,67 +19,8 @@
 
 {{define "feed-more"}}
 {{range .FeedPage.Posts}}
-<li class="post-card">
-    {{if .RepostedBy}}
-    <div class="repost-attribution">
-        <span class="repost-attribution-icon">↻</span>
-        Reposted by
-        <span class="repost-attribution-name">{{if .RepostedBy.DisplayName}}{{.RepostedBy.DisplayName}}{{else}}@{{.RepostedBy.Handle}}{{end}}</span>
-    </div>
-    {{end}}
-    <div class="post-header">
-        <div class="post-author">
-            {{if .Author.Avatar}}
-            <img class="post-author-avatar" src="{{derefStr .Author.Avatar}}" alt="" loading="lazy">
-            {{else}}
-            <div class="post-author-avatar post-author-initials">{{initials .Author.DisplayName .Author.Handle}}</div>
-            {{end}}
-            <div class="post-author-info">
-                {{if .Author.DisplayName}}
-                <span class="post-author-name">{{.Author.DisplayName}}</span>
-                {{end}}
-                <span class="post-author-handle">@{{.Author.Handle}}</span>
-            </div>
-        </div>
-        <span class="post-timestamp">{{relativeTime .IndexedAt}}</span>
-    </div>
-    <div class="post-body">
-        <p class="post-text">{{highlightHashtags .Text}}</p>
-        {{if .Images}}
-        <div class="post-images">
-            {{range .Images}}
-            <a href="{{.Fullsize}}" target="_blank" rel="noopener noreferrer" class="post-image-link">
-                <img class="post-image" src="{{.Thumb}}" alt="{{.Alt}}" loading="lazy">
-            </a>
-            {{end}}
-        </div>
-        {{end}}
-        {{if .ExternalLink}}
-        <a href="{{.ExternalLink.URI}}" target="_blank" rel="noopener noreferrer" class="link-card">
-            {{if .ExternalLink.Thumb}}
-            <img class="link-card-thumb" src="{{.ExternalLink.Thumb}}" alt="" loading="lazy">
-            {{end}}
-            <div class="link-card-body">
-                {{if .ExternalLink.Title}}<p class="link-card-title">{{.ExternalLink.Title}}</p>{{end}}
-                {{if .ExternalLink.Description}}<p class="link-card-desc">{{.ExternalLink.Description}}</p>{{end}}
-                <p class="link-card-url">{{.ExternalLink.URI}}</p>
-            </div>
-        </a>
-        {{end}}
-    </div>
-    <div class="post-meta">
-        <span class="post-count post-count-reply"
-              data-uri="{{safeAtURI .URI}}"
-              data-cid="{{.CID}}"
-              data-root-uri="{{safeAtURI .ReplyRootURI}}"
-              data-root-cid="{{.ReplyRootCID}}"
-              data-author="{{.Author.Handle}}"
-              data-text="{{.Text}}"
-              onclick="openComposerReply(this)"
-              title="Reply">{{formatCount .ReplyCount}}</span>
-        {{template "repost-button" .}}
-        {{template "like-button" .}}
-    </div>
+<li class="post-card" data-post-uri="{{safeAtURI .URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
+    {{template "post-card-inner" .}}
 </li>
 {{end}}
 {{if .SentinelURL}}

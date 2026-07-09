@@ -200,6 +200,19 @@ document.addEventListener('keydown', e => {
     }
 });
 
+// --- Thread navigation ---
+
+// Navigates to the thread view for a post card click, unless the click landed
+// on an interactive element that has its own behaviour.
+function navigateToThread(evt, uri) {
+    if (!uri) return;
+    const blocked = evt.target.closest(
+        '.post-count, .post-hashtag, .link-card, .post-image-link, a, button'
+    );
+    if (blocked) return;
+    window.location.href = '/thread?uri=' + encodeURIComponent(uri);
+}
+
 // --- Template management ---
 
 // Updates a character counter span and optionally disables a submit button when over limit.

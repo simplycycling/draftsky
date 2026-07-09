@@ -1,0 +1,31 @@
+{{define "content"}}
+<div id="feed-root">
+    <div class="feed-controls">
+        <div class="feed-controls-inner">
+            <span class="feed-label">Thread</span>
+            <button class="btn-back" onclick="window.history.length > 1 ? window.history.back() : (window.location.href = '/')">← Back</button>
+        </div>
+    </div>
+    {{if .Error}}
+    <div class="feed-empty">
+        <p class="muted-text">{{.Error}}</p>
+    </div>
+    {{else if .Thread}}
+    <ul class="post-list">
+        {{range .Thread.Ancestors}}
+        <li class="post-card post-card-ancestor" data-post-uri="{{safeAtURI .URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
+            {{template "post-card-inner" .}}
+        </li>
+        {{end}}
+        <li class="post-card post-card-focal" data-post-uri="{{safeAtURI .Thread.Focal.URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
+            {{template "post-card-inner" .Thread.Focal}}
+        </li>
+        {{range .Thread.Replies}}
+        <li class="post-card" data-post-uri="{{safeAtURI .URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
+            {{template "post-card-inner" .}}
+        </li>
+        {{end}}
+    </ul>
+    {{end}}
+</div>
+{{end}}

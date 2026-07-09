@@ -69,6 +69,13 @@ type TemplatesPageData struct {
 	Templates []templateResponse
 }
 
+// ThreadPageData is the data envelope for the thread view page.
+type ThreadPageData struct {
+	LayoutData
+	Thread *feed.ThreadView
+	Error  string
+}
+
 // UIHandler renders HTML pages.
 type UIHandler struct {
 	queries       *db.Queries
@@ -76,6 +83,7 @@ type UIHandler struct {
 	feedClient    *feed.Client
 	tmplHome      *template.Template
 	tmplTemplates *template.Template
+	tmplThread    *template.Template
 	tmplLogin     *template.Template
 	tmpl404       *template.Template
 	tmpl500       *template.Template
@@ -93,12 +101,23 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		// are detected correctly, then escapes each segment exactly once before
 		// assembling the result. Returning template.HTML tells html/template not
 		// to apply a second round of escaping.
+		// highlightHashtags wraps hashtag tokens in a styled, clickable span.
+		// Runs the regex on plain text so that apostrophes and other punctuation
+		// are detected correctly, then escapes each segment exactly once before
+		// assembling the result. Each span gets an onclick that stops propagation
+		// (so the card-level navigateToThread never fires) and switches the feed
+		// via switchToHashtagFeed. JSEscapeString guards the tag name embedded
+		// inside the JS string literal; HTMLEscapeString handles display text.
+		// Returning template.HTML tells html/template not to double-escape.
 		"highlightHashtags": func(text string) template.HTML {
 			var buf strings.Builder
 			last := 0
 			for _, m := range uiHashtagRe.FindAllStringIndex(text, -1) {
 				buf.WriteString(template.HTMLEscapeString(text[last:m[0]]))
-				buf.WriteString(`<span class="post-hashtag">`)
+				tag := template.JSEscapeString(text[m[0]+1 : m[1]]) // strip '#', JS-escape
+				buf.WriteString(`<span class="post-hashtag" onclick="event.stopPropagation();switchToHashtagFeed(['`)
+				buf.WriteString(tag)
+				buf.WriteString(`'])">`)
 				buf.WriteString(template.HTMLEscapeString(text[m[0]:m[1]]))
 				buf.WriteString(`</span>`)
 				last = m[1]
@@ -153,6 +172,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplHome, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/post_card.html",
 		"templates/partials/feed.html",
 		"templates/partials/feed_controls.html",
 		"templates/index.html",
@@ -165,6 +185,15 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		"templates/partials/composer.html",
 		"templates/partials/template_row.html",
 		"templates/templates.html",
+	)
+	if err != nil {
+		return nil, err
+	}
+	tmplThread, err := template.New("").Funcs(funcMap).ParseFiles(
+		"templates/layout.html",
+		"templates/partials/composer.html",
+		"templates/partials/post_card.html",
+		"templates/thread.html",
 	)
 	if err != nil {
 		return nil, err
@@ -187,6 +216,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		feedClient:    feedClient,
 		tmplHome:      tmplHome,
 		tmplTemplates: tmplTemplates,
+		tmplThread:    tmplThread,
 		tmplLogin:     tmplLogin,
 		tmpl404:       tmpl404,
 		tmpl500:       tmpl500,
@@ -524,6 +554,55 @@ func (h *UIHandler) HandleWebUpdateTemplate(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplTemplates.ExecuteTemplate(c.Writer, "template-row", r); err != nil {
 		slog.Error("render template-row (update)", "err", err)
+	}
+}
+
+// HandleThreadPage renders the full thread view for the post at the given AT URI.
+// Route: GET /thread?uri=<at-uri>
+func (h *UIHandler) HandleThreadPage(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+
+	user, err := h.queries.GetUserByDID(c.Request.Context(), did)
+	if err != nil {
+		slog.Error("GetUserByDID in thread handler", "did", did, "err", err)
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	data := ThreadPageData{
+		LayoutData: h.buildLayoutBase(c, did, user),
+	}
+
+	uri := c.Query("uri")
+	if !atURIRe.MatchString(uri) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.Status(http.StatusBadRequest)
+		data.Error = "Invalid post URL."
+		if err := h.tmplThread.ExecuteTemplate(c.Writer, "layout", data); err != nil {
+			slog.Error("render thread page (bad uri)", "err", err)
+		}
+		return
+	}
+
+	threadView, err := h.feedClient.GetThread(c.Request.Context(), did, sessionID, uri)
+	if err != nil {
+		switch {
+		case errors.Is(err, feed.ErrThreadNotFound):
+			data.Error = "This post could not be found."
+		case errors.Is(err, feed.ErrThreadBlocked):
+			data.Error = "This post is from an account you've blocked."
+		default:
+			slog.Error("GetThread", "uri", uri, "did", did, "err", err)
+			data.Error = "Unable to load thread. Please try again."
+		}
+	} else {
+		data.Thread = threadView
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplThread.ExecuteTemplate(c.Writer, "layout", data); err != nil {
+		slog.Error("render thread page", "err", err)
 	}
 }
 

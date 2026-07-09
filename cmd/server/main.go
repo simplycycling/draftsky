@@ -163,6 +163,7 @@ func main() {
 	// Authenticated web UI routes
 	web := r.Group("/", middleware.RequireSession(secret))
 	web.GET("", uiH.HandleHome)
+	web.GET("/thread", uiH.HandleThreadPage)
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
 	web.GET("/templates", uiH.HandleTemplatesPage)

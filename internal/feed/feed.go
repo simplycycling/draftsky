@@ -60,6 +60,10 @@ type PostView struct {
 	// RepostedBy is non-nil when the post appears in the timeline because someone the
 	// user follows reposted it. Nil for original posts and all hashtag-feed results.
 	RepostedBy *PostAuthor `json:"reposted_by,omitempty"`
+	// ReplyingTo is non-nil when the timeline item carries reply context (i.e. the post
+	// is a reply and the parent's author is known). Nil for top-level posts and for
+	// search results where reply context is unavailable.
+	ReplyingTo *PostAuthor `json:"replying_to,omitempty"`
 }
 
 // FeedPage is a page of posts with an optional cursor for the next page.
@@ -125,6 +129,20 @@ func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor st
 					by.DisplayName = *r.By.DisplayName
 				}
 				pv.RepostedBy = &by
+			}
+		}
+		if item.Reply != nil && item.Reply.Parent != nil && item.Reply.Parent.FeedDefs_PostView != nil {
+			parentPV := item.Reply.Parent.FeedDefs_PostView
+			if parentPV.Author != nil {
+				replyingTo := &PostAuthor{
+					DID:    parentPV.Author.Did,
+					Handle: parentPV.Author.Handle,
+					Avatar: parentPV.Author.Avatar,
+				}
+				if parentPV.Author.DisplayName != nil {
+					replyingTo.DisplayName = *parentPV.Author.DisplayName
+				}
+				pv.ReplyingTo = replyingTo
 			}
 		}
 		posts = append(posts, pv)
