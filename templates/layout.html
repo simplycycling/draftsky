@@ -39,7 +39,23 @@
     </aside>
 
     <!-- Centre -->
-    <main class="centre">
+    <main class="centre{{if .SavedFeeds}} has-feed-tabs{{end}}">
+        {{if .SavedFeeds}}
+        <nav class="feed-tabs">
+            {{$feedType := .FeedType}}
+            {{$customURI := .FeedCustomURI}}
+            {{range .SavedFeeds}}
+            {{if .IsTimeline}}
+            <button class="feed-tab{{if eq $feedType "following"}} active{{end}}"
+                    data-timeline
+                    onclick="switchFeedTab(this, '/feed/following')">{{.DisplayName}}</button>
+            {{else}}
+            <button class="feed-tab{{if and (eq $feedType "custom") (eq .URI $customURI)}} active{{end}}"
+                    onclick="switchFeedTab(this, '/feed/custom?uri={{urlquote .URI}}')">{{.DisplayName}}</button>
+            {{end}}
+            {{end}}
+        </nav>
+        {{end}}
         {{template "content" .}}
     </main>
 

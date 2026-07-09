@@ -207,7 +207,7 @@ document.addEventListener('keydown', e => {
 function navigateToThread(evt, uri) {
     if (!uri) return;
     const blocked = evt.target.closest(
-        '.post-count, .post-hashtag, .link-card, .post-image-link, a, button'
+        '.post-count, .post-hashtag, .link-card, .post-image-link, .quoted-card, a, button'
     );
     if (blocked) return;
     window.location.href = '/thread?uri=' + encodeURIComponent(uri);
@@ -387,10 +387,27 @@ async function saveReorder() {
 // can refresh the same feed rather than jumping to Following.
 let currentFeedURL = '/feed/following';
 
+// Removes active from all feed tabs; marks btn active when non-null.
+function activateTab(btn) {
+    document.querySelectorAll('.feed-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+
+// Activates a feed tab, updates currentFeedURL, and swaps the centre feed via HTMX.
+function switchFeedTab(btn, feedURL) {
+    activateTab(btn);
+    currentFeedURL = feedURL;
+    htmx.ajax('GET', feedURL, { target: '#feed-root', swap: 'innerHTML' });
+}
+
 function switchToHashtagFeed(tags) {
-    currentFeedURL = (tags && tags.length > 0)
-        ? '/feed/hashtags?tags=' + tags.map(encodeURIComponent).join(',')
-        : '/feed/following';
+    if (!tags || tags.length === 0) {
+        // No tags — return to Following feed and re-activate that tab.
+        switchFeedTab(document.querySelector('.feed-tab[data-timeline]'), '/feed/following');
+        return;
+    }
+    activateTab(null); // hashtag feed has no pinned tab
+    currentFeedURL = '/feed/hashtags?tags=' + tags.map(encodeURIComponent).join(',');
     htmx.ajax('GET', currentFeedURL, { target: '#feed-root', swap: 'innerHTML' });
 }
 

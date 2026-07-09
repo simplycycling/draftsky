@@ -86,6 +86,52 @@
             </div>
         </a>
         {{end}}
+        {{if .Quoted}}
+        {{if .Quoted.Unavailable}}
+        <div class="quoted-card quoted-card-unavailable">
+            <span class="quoted-unavailable-label">Post unavailable</span>
+        </div>
+        {{else}}
+        <div class="quoted-card"
+             data-quoted-uri="{{safeAtURI .Quoted.URI}}"
+             onclick="event.stopPropagation(); navigateToThread(event, this.dataset.quotedUri)"
+             style="cursor:pointer">
+            <div class="quoted-header">
+                {{if .Quoted.Author.Avatar}}
+                <img class="quoted-avatar" src="{{derefStr .Quoted.Author.Avatar}}" alt="" loading="lazy">
+                {{else}}
+                <div class="quoted-avatar quoted-avatar-initials">{{initials .Quoted.Author.DisplayName .Quoted.Author.Handle}}</div>
+                {{end}}
+                <div class="quoted-author-info">
+                    {{if .Quoted.Author.DisplayName}}<span class="quoted-author-name">{{.Quoted.Author.DisplayName}}</span>{{end}}
+                    <span class="quoted-author-handle">@{{.Quoted.Author.Handle}}</span>
+                </div>
+            </div>
+            {{if .Quoted.Text}}<p class="quoted-text">{{.Quoted.Text}}</p>{{end}}
+            {{if .Quoted.Images}}
+            <div class="quoted-images">
+                {{range .Quoted.Images}}
+                <a href="{{.Fullsize}}" target="_blank" rel="noopener noreferrer" class="post-image-link" onclick="event.stopPropagation()">
+                    <img class="quoted-image" src="{{.Thumb}}" alt="{{.Alt}}" loading="lazy">
+                </a>
+                {{end}}
+            </div>
+            {{end}}
+            {{if .Quoted.ExternalLink}}
+            <a href="{{.Quoted.ExternalLink.URI}}" target="_blank" rel="noopener noreferrer" class="link-card quoted-link-card" onclick="event.stopPropagation()">
+                {{if .Quoted.ExternalLink.Thumb}}
+                <img class="link-card-thumb" src="{{.Quoted.ExternalLink.Thumb}}" alt="" loading="lazy">
+                {{end}}
+                <div class="link-card-body">
+                    {{if .Quoted.ExternalLink.Title}}<p class="link-card-title">{{.Quoted.ExternalLink.Title}}</p>{{end}}
+                    {{if .Quoted.ExternalLink.Description}}<p class="link-card-desc">{{.Quoted.ExternalLink.Description}}</p>{{end}}
+                    <p class="link-card-url">{{.Quoted.ExternalLink.URI}}</p>
+                </div>
+            </a>
+            {{end}}
+        </div>
+        {{end}}
+        {{end}}
     </div>
     <div class="post-meta">
         <span class="post-count post-count-reply"

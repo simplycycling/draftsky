@@ -271,6 +271,52 @@ button {
 }
 
 /* =========================================================
+   Feed tabs
+   ========================================================= */
+
+.feed-tabs {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--color-card);
+    background: var(--color-bg);
+    position: sticky;
+    top: 0;
+    z-index: 11;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0;
+}
+
+.feed-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.feed-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 12px 18px;
+    font-family: var(--font);
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--color-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color 0.1s;
+}
+
+.feed-tab:hover {
+    color: var(--color-text);
+}
+
+.feed-tab.active {
+    color: var(--color-text);
+    border-bottom-color: var(--color-accent);
+    font-weight: 600;
+}
+
+/* =========================================================
    Feed controls bar
    ========================================================= */
 
@@ -281,6 +327,11 @@ button {
     top: 0;
     background: var(--color-bg);
     z-index: 10;
+}
+
+/* When tabs are present, feed-controls sticks below them (~44px tab height). */
+.has-feed-tabs .feed-controls {
+    top: 44px;
 }
 
 .feed-controls-inner {
@@ -541,11 +592,12 @@ button {
 }
 
 .post-image {
+    display: block;
     width: 100%;
     height: auto;
-    max-height: 300px;
+    max-height: 480px;
     object-fit: cover;
-    display: block;
+    object-position: top;
     border-radius: var(--radius);
 }
 
@@ -614,6 +666,132 @@ button {
     overflow: hidden;
     text-overflow: ellipsis;
     margin-top: 2px;
+}
+
+/* ---- Quoted post card ---- */
+
+.quoted-card {
+    margin-top: 8px;
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    background: var(--color-surface);
+    transition: border-color 0.15s;
+}
+
+.quoted-card:not(.quoted-card-unavailable):hover {
+    border-color: var(--color-accent);
+}
+
+.quoted-card-unavailable {
+    cursor: default;
+}
+
+.quoted-unavailable-label {
+    font-size: 0.82rem;
+    color: var(--color-muted);
+}
+
+.quoted-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.quoted-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--color-card);
+}
+
+.quoted-avatar-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+
+.quoted-author-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.quoted-author-name {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quoted-author-handle {
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.quoted-text {
+    font-size: 0.88rem;
+    line-height: 1.5;
+    color: var(--color-text);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    margin-bottom: 6px;
+}
+
+.quoted-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.quoted-image {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 220px;
+    object-fit: cover;
+    object-position: top;
+    border-radius: var(--radius);
+}
+
+.quoted-link-card {
+    margin-top: 6px;
+}
+
+/* Compact overrides for the link card inside a quoted post */
+.quoted-link-card .link-card-thumb {
+    width: 52px;
+    min-width: 52px;
+    height: 52px;
+}
+
+.quoted-link-card .link-card-body {
+    padding: 6px 10px;
+    gap: 1px;
+}
+
+.quoted-link-card .link-card-title {
+    font-size: 0.82rem;
+    -webkit-line-clamp: 1;
+}
+
+.quoted-link-card .link-card-desc {
+    font-size: 0.78rem;
+    -webkit-line-clamp: 1;
 }
 
 /* =========================================================

@@ -53,14 +53,16 @@ type PageUser struct {
 
 // LayoutData is the data envelope passed to every page rendered with layout.html.
 type LayoutData struct {
-	User       PageUser
-	Theme      string
-	RecentTags []string
+	User        PageUser
+	Theme       string
+	RecentTags  []string
+	SavedFeeds  []feed.SavedFeed // pinned feeds for the tab bar; nil = no tabs
 	// Feed state
-	FeedPage    *feed.FeedPage
-	FeedType    string   // "following" | "hashtag"
-	FeedTags    []string // active hashtag tags (for display + next-page URL)
-	SentinelURL string   // next-page URL embedded in the scroll sentinel
+	FeedPage      *feed.FeedPage
+	FeedType      string   // "following" | "hashtag" | "custom"
+	FeedTags      []string // active hashtag tags (for display + next-page URL)
+	FeedCustomURI string   // AT URI of the active custom feed (FeedType=="custom")
+	SentinelURL   string   // next-page URL embedded in the scroll sentinel
 }
 
 // TemplatesPageData is the data envelope for the templates management page.
@@ -96,6 +98,8 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	funcMap := template.FuncMap{
 		// safeAtURI validates and marks an AT Protocol URI safe for URL-context attributes.
 		"safeAtURI": safeAtURI,
+		// urlquote percent-encodes a string for use in URL query parameters.
+		"urlquote": url.QueryEscape,
 		// highlightHashtags wraps hashtag tokens in a styled span.
 		// Runs the regex on plain text so that apostrophes and other punctuation
 		// are detected correctly, then escapes each segment exactly once before
@@ -280,7 +284,7 @@ func (h *UIHandler) HandleHome(c *gin.Context) {
 		feedPage = fetchedPage
 	}
 
-	data := h.buildLayoutBase(c, did, user)
+	data := h.buildLayoutBase(c, did, sessionID, user)
 	data.FeedPage = feedPage
 	data.FeedType = "following"
 	data.SentinelURL = followingSentinelURL(feedPage.NextCursor)
@@ -371,6 +375,46 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 	}
 }
 
+// HandleCustomFeedPartial serves HTMX partial responses for a Bluesky algorithm feed.
+// Without a cursor it returns the full "feed" block; with a cursor it returns "feed-more".
+func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+	cursor := c.Query("cursor")
+	feedURI := c.Query("uri")
+
+	if !atURIRe.MatchString(feedURI) {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
+	if fetchedPage, err := h.feedClient.GetCustomFeed(
+		c.Request.Context(), did, sessionID, feedURI, cursor, uiFeedLimit,
+	); err != nil {
+		slog.Error("GetCustomFeed (partial)", "did", did, "uri", feedURI, "err", err)
+	} else {
+		feedPage = fetchedPage
+	}
+
+	data := LayoutData{
+		FeedPage:      feedPage,
+		FeedType:      "custom",
+		FeedCustomURI: feedURI,
+		SentinelURL:   customFeedSentinelURL(feedURI, feedPage.NextCursor),
+	}
+
+	tmplName := "feed"
+	if cursor != "" {
+		tmplName = "feed-more"
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplHome.ExecuteTemplate(c.Writer, tmplName, data); err != nil {
+		slog.Error("render custom feed partial", "template", tmplName, "err", err)
+	}
+}
+
 // resolveUserForTemplates looks up the user row by DID and writes an error
 // response if it fails. Used by the template web handlers.
 func (h *UIHandler) resolveUserForTemplates(c *gin.Context, did string) (db.User, bool) {
@@ -387,8 +431,9 @@ func (h *UIHandler) resolveUserForTemplates(c *gin.Context, did string) (db.User
 	return user, true
 }
 
-// buildLayoutBase populates the common LayoutData fields for a given user.
-func (h *UIHandler) buildLayoutBase(c *gin.Context, did string, user db.User) LayoutData {
+// buildLayoutBase populates the common LayoutData fields for a given user,
+// including fetching saved feeds for the tab bar (non-fatal on failure).
+func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user db.User) LayoutData {
 	tagRows, err := h.queries.GetRecentTagsByUser(
 		c.Request.Context(),
 		pgtype.Int4{Int32: user.ID, Valid: true},
@@ -416,6 +461,13 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did string, user db.User) La
 		avatar = user.Avatar.String
 	}
 
+	// Fetch saved feeds for the tab bar — degrade to Following-only on failure.
+	savedFeeds, err := h.feedClient.GetSavedFeeds(c.Request.Context(), did, sessionID)
+	if err != nil {
+		slog.Warn("GetSavedFeeds failed, using following-only tab bar", "did", did, "err", err)
+		savedFeeds = []feed.SavedFeed{{DisplayName: "Following", IsTimeline: true}}
+	}
+
 	return LayoutData{
 		User: PageUser{
 			DID:    did,
@@ -425,12 +477,14 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did string, user db.User) La
 		},
 		Theme:      theme,
 		RecentTags: recentTags,
+		SavedFeeds: savedFeeds,
 	}
 }
 
 // HandleTemplatesPage renders the template management page.
 func (h *UIHandler) HandleTemplatesPage(c *gin.Context) {
 	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
 
 	user, ok := h.resolveUserForTemplates(c, did)
 	if !ok {
@@ -452,7 +506,7 @@ func (h *UIHandler) HandleTemplatesPage(c *gin.Context) {
 	}
 
 	data := TemplatesPageData{
-		LayoutData: h.buildLayoutBase(c, did, user),
+		LayoutData: h.buildLayoutBase(c, did, sessionID, user),
 		Templates:  templates,
 	}
 
@@ -571,7 +625,7 @@ func (h *UIHandler) HandleThreadPage(c *gin.Context) {
 	}
 
 	data := ThreadPageData{
-		LayoutData: h.buildLayoutBase(c, did, user),
+		LayoutData: h.buildLayoutBase(c, did, sessionID, user),
 	}
 
 	uri := c.Query("uri")
@@ -618,4 +672,11 @@ func hashtagSentinelURL(tags []string, nextCursor string) string {
 		return ""
 	}
 	return "/feed/hashtags?tags=" + strings.Join(tags, ",") + "&cursor=" + url.QueryEscape(nextCursor)
+}
+
+func customFeedSentinelURL(feedURI, nextCursor string) string {
+	if nextCursor == "" || feedURI == "" {
+		return ""
+	}
+	return "/feed/custom?uri=" + url.QueryEscape(feedURI) + "&cursor=" + url.QueryEscape(nextCursor)
 }

@@ -1,20 +1,20 @@
 {{define "feed-controls"}}
+{{if eq .FeedType "hashtag"}}
 <div class="feed-controls">
-    {{if eq .FeedType "hashtag"}}
     <div class="feed-controls-inner">
         <span class="feed-label">
             Hashtag Feed:
             {{range .FeedTags}}<span class="feed-active-tag">#{{.}}</span> {{end}}
         </span>
         <button class="btn-back"
-                hx-get="/feed/following"
-                hx-target="#feed-root"
-                hx-swap="innerHTML">Back to Following</button>
+                onclick="switchFeedTab(document.querySelector('.feed-tab[data-timeline]'), '/feed/following')">Back to Following</button>
     </div>
-    {{else}}
+</div>
+{{else if eq .FeedType "following"}}
+<div class="feed-controls">
     <div class="feed-controls-inner">
         <span class="feed-label">Following</span>
     </div>
-    {{end}}
 </div>
+{{end}}
 {{end}}

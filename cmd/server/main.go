@@ -166,6 +166,7 @@ func main() {
 	web.GET("/thread", uiH.HandleThreadPage)
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
+	web.GET("/feed/custom", uiH.HandleCustomFeedPartial)
 	web.GET("/templates", uiH.HandleTemplatesPage)
 	web.POST("/templates", uiH.HandleWebCreateTemplate)
 	web.PUT("/templates/:id", uiH.HandleWebUpdateTemplate)

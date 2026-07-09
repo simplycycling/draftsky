@@ -36,6 +36,18 @@ type PostExternalLink struct {
 	Thumb       string `json:"thumb,omitempty"`
 }
 
+// QuotedPost is a post embedded as a quote inside another post (app.bsky.embed.record#viewRecord).
+// Unavailable is true for NotFound/Blocked/Detached variants.
+type QuotedPost struct {
+	URI          string            `json:"uri"`
+	Author       PostAuthor        `json:"author"`
+	Text         string            `json:"text"`
+	IndexedAt    string            `json:"indexed_at"`
+	Images       []PostImage       `json:"images,omitempty"`
+	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
+	Unavailable  bool              `json:"unavailable,omitempty"`
+}
+
 // PostView is the clean JSON representation of a single post in a feed.
 // No indigo types leak out of this struct.
 type PostView struct {
@@ -53,6 +65,7 @@ type PostView struct {
 	RepostURI    string            `json:"repost_uri,omitempty"`
 	Images       []PostImage       `json:"images,omitempty"`
 	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
+	Quoted       *QuotedPost       `json:"quoted,omitempty"`
 	// ReplyRootURI / ReplyRootCID are populated from the post's own reply.root when
 	// the post is itself a reply. Empty for top-level posts.
 	ReplyRootURI string `json:"reply_root_uri,omitempty"`
@@ -97,22 +110,12 @@ func (c *Client) resumeAPIClient(ctx context.Context, did, sessionID string) (*a
 	return sess.APIClient(), nil
 }
 
-// GetFollowingFeed returns a page of the authenticated user's Following feed,
-// using app.bsky.feed.getTimeline. The cursor is the opaque string returned
-// in the previous response; pass an empty string for the first page.
-func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor string, limit int) (*FeedPage, error) {
-	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
-	if err != nil {
-		return nil, err
-	}
-
-	out, err := appbsky.FeedGetTimeline(ctx, apiClient, "", cursor, int64(limit))
-	if err != nil {
-		return nil, fmt.Errorf("getTimeline: %w", err)
-	}
-
-	posts := make([]PostView, 0, len(out.Feed))
-	for _, item := range out.Feed {
+// mapFeedViewPosts converts a slice of FeedViewPost items to PostViews,
+// extracting repost attribution and reply context where available.
+// Used by GetFollowingFeed and GetCustomFeed.
+func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost) []PostView {
+	posts := make([]PostView, 0, len(items))
+	for _, item := range items {
 		if item == nil || item.Post == nil {
 			continue
 		}
@@ -147,6 +150,24 @@ func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor st
 		}
 		posts = append(posts, pv)
 	}
+	return posts
+}
+
+// GetFollowingFeed returns a page of the authenticated user's Following feed,
+// using app.bsky.feed.getTimeline. The cursor is the opaque string returned
+// in the previous response; pass an empty string for the first page.
+func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor string, limit int) (*FeedPage, error) {
+	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := appbsky.FeedGetTimeline(ctx, apiClient, "", cursor, int64(limit))
+	if err != nil {
+		return nil, fmt.Errorf("getTimeline: %w", err)
+	}
+
+	posts := mapFeedViewPosts(out.Feed)
 
 	var nextCursor string
 	if out.Cursor != nil {
@@ -270,6 +291,77 @@ func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags
 	return &FeedPage{Posts: all, NextCursor: nextCursor}, nil
 }
 
+// mapEmbedRecordView converts an EmbedRecord_View_Record union (the record half of a
+// quote-post embed) to a QuotedPost. Returns nil for non-post variants such as generator
+// views, list views, etc. Returns a QuotedPost with Unavailable=true for
+// ViewNotFound/ViewBlocked/ViewDetached. Does not recurse into nested quotes.
+func mapEmbedRecordView(record *appbsky.EmbedRecord_View_Record) *QuotedPost {
+	if record == nil {
+		return nil
+	}
+	if record.EmbedRecord_ViewNotFound != nil || record.EmbedRecord_ViewBlocked != nil || record.EmbedRecord_ViewDetached != nil {
+		return &QuotedPost{Unavailable: true}
+	}
+	vr := record.EmbedRecord_ViewRecord
+	if vr == nil {
+		return nil
+	}
+
+	qp := &QuotedPost{
+		URI:       vr.Uri,
+		IndexedAt: vr.IndexedAt,
+	}
+
+	if vr.Author != nil {
+		qp.Author = PostAuthor{
+			DID:    vr.Author.Did,
+			Handle: vr.Author.Handle,
+			Avatar: vr.Author.Avatar,
+		}
+		if vr.Author.DisplayName != nil {
+			qp.Author.DisplayName = *vr.Author.DisplayName
+		}
+	}
+
+	if vr.Value != nil {
+		if fp, ok := vr.Value.Val.(*appbsky.FeedPost); ok {
+			qp.Text = fp.Text
+		}
+	}
+
+	for _, em := range vr.Embeds {
+		if em == nil {
+			continue
+		}
+		if em.EmbedImages_View != nil && qp.Images == nil {
+			for _, img := range em.EmbedImages_View.Images {
+				if img != nil {
+					qp.Images = append(qp.Images, PostImage{
+						Thumb:    img.Thumb,
+						Fullsize: img.Fullsize,
+						Alt:      img.Alt,
+					})
+				}
+			}
+		}
+		if em.EmbedExternal_View != nil && qp.ExternalLink == nil && em.EmbedExternal_View.External != nil {
+			ext := em.EmbedExternal_View.External
+			el := &PostExternalLink{
+				URI:         ext.Uri,
+				Title:       ext.Title,
+				Description: ext.Description,
+			}
+			if ext.Thumb != nil {
+				el.Thumb = *ext.Thumb
+			}
+			qp.ExternalLink = el
+		}
+		// EmbedRecord_View in embeds would be a quote-of-a-quote — do not recurse.
+	}
+
+	return qp
+}
+
 // postViewFromBsky converts an indigo FeedDefs_PostView to a clean PostView,
 // extracting the post text from the record's decoded value.
 func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
@@ -341,6 +433,38 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 				el.Thumb = *ext.External.Thumb
 			}
 			v.ExternalLink = el
+		}
+		if pv.Embed.EmbedRecord_View != nil {
+			v.Quoted = mapEmbedRecordView(pv.Embed.EmbedRecord_View.Record)
+		}
+		if rwm := pv.Embed.EmbedRecordWithMedia_View; rwm != nil {
+			if rwm.Media != nil {
+				if rwm.Media.EmbedImages_View != nil {
+					for _, img := range rwm.Media.EmbedImages_View.Images {
+						if img != nil {
+							v.Images = append(v.Images, PostImage{
+								Thumb:    img.Thumb,
+								Fullsize: img.Fullsize,
+								Alt:      img.Alt,
+							})
+						}
+					}
+				}
+				if ext := rwm.Media.EmbedExternal_View; ext != nil && ext.External != nil {
+					el := &PostExternalLink{
+						URI:         ext.External.Uri,
+						Title:       ext.External.Title,
+						Description: ext.External.Description,
+					}
+					if ext.External.Thumb != nil {
+						el.Thumb = *ext.External.Thumb
+					}
+					v.ExternalLink = el
+				}
+			}
+			if rwm.Record != nil {
+				v.Quoted = mapEmbedRecordView(rwm.Record.Record)
+			}
 		}
 	}
 
