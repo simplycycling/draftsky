@@ -79,6 +79,24 @@ func ParseSessionCookie(cookieValue string, secret []byte) (did, sessionID strin
 	return p.DID, p.SessionID, nil
 }
 
+// CSRFToken derives a double-submit CSRF token from the session ID using
+// HMAC-SHA256(secret, "csrf:"+sessionID), base64url encoded. It is deterministic
+// per session (no server-side storage needed) and becomes invalid the moment the
+// session rotates. The "csrf:" domain-separation prefix ensures the token can
+// never collide with the session-cookie signature, which HMACs a different input.
+func CSRFToken(sessionID string, secret []byte) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte("csrf:" + sessionID))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// VerifyCSRFToken reports whether token is the valid CSRF token for the given
+// session, using a constant-time comparison to avoid timing attacks.
+func VerifyCSRFToken(sessionID, token string, secret []byte) bool {
+	want := CSRFToken(sessionID, secret)
+	return hmac.Equal([]byte(token), []byte(want))
+}
+
 // setSession writes a signed session cookie containing the user's DID and
 // the indigo session ID (needed to resume the OAuth session for API calls).
 func (h *Handler) setSession(w http.ResponseWriter, did, sessionID string) error {

@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ .CSRFToken }}">
     <title>DraftSky</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/static/style.css">
@@ -32,6 +33,9 @@
                 <hr class="nav-divider">
                 <button class="btn-new-post" onclick="openComposer()">New Post</button>
                 <form action="/auth/logout" method="POST">
+                    <!-- /auth/logout is CSRF-exempt (SameSite=Lax + non-destructive);
+                         the token is included as defence-in-depth via the form-field fallback. -->
+                    <input type="hidden" name="csrf_token" value="{{ .CSRFToken }}">
                     <button type="submit" class="nav-link btn-logout">Sign out</button>
                 </form>
             </nav>

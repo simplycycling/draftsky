@@ -160,8 +160,10 @@ func main() {
 	r.GET("/login", uiH.HandleLoginPage)
 	r.NoRoute(uiH.Handle404)
 
-	// Authenticated web UI routes
-	web := r.Group("/", middleware.RequireSession(secret))
+	// Authenticated web UI routes. RequireCSRF runs after RequireSession (which
+	// populates the session ID it verifies against) and only guards mutating
+	// methods, so the GET routes below are unaffected.
+	web := r.Group("/", middleware.RequireSession(secret), middleware.RequireCSRF(secret))
 	web.GET("", uiH.HandleHome)
 	web.GET("/thread", uiH.HandleThreadPage)
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
@@ -172,7 +174,9 @@ func main() {
 	web.PUT("/templates/:id", uiH.HandleWebUpdateTemplate)
 
 	// Protected route group — all routes added here require a valid session cookie.
-	api := r.Group("/api", middleware.RequireAuth(secret))
+	// RequireCSRF runs after RequireAuth and guards only mutating methods, so the
+	// GET feed routes are unaffected.
+	api := r.Group("/api", middleware.RequireAuth(secret), middleware.RequireCSRF(secret))
 
 	postH := handlers.NewPostHandler(queries, poster)
 	api.POST("/post", postH.HandleCreatePost)

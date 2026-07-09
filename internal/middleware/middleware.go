@@ -95,6 +95,40 @@ func RequireAuth(secret []byte) gin.HandlerFunc {
 	}
 }
 
+// CSRFHeaderName is the request header carrying the double-submit CSRF token.
+const CSRFHeaderName = "X-CSRF-Token"
+
+// RequireCSRF enforces double-submit CSRF protection on state-mutating requests.
+// Safe methods (GET/HEAD/OPTIONS) pass through untouched. For POST/PUT/DELETE/PATCH
+// it reads the token from the X-CSRF-Token header, falling back to a csrf_token
+// form field (for plain HTML form posts that cannot set a header), and verifies it
+// against the session ID already placed in the context by RequireAuth/RequireSession.
+// It MUST therefore run after one of those middlewares. Rejects with 403 JSON on a
+// missing or invalid token.
+func RequireCSRF(secret []byte) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+			return
+		}
+
+		token := c.GetHeader(CSRFHeaderName)
+		if token == "" {
+			// PostForm only parses form-encoded/multipart bodies, so this never
+			// consumes a JSON request body.
+			token = c.PostForm("csrf_token")
+		}
+
+		sessionID := c.GetString(ContextKeySessionID)
+		if token == "" || !auth.VerifyCSRFToken(sessionID, token, secret) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid or missing CSRF token"})
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequireSession validates the signed session cookie and injects the user's DID
 // into the Gin context. Redirects to /login for missing or invalid sessions.
 // Used for web UI routes rendered as HTML pages.

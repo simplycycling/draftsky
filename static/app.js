@@ -1,5 +1,20 @@
 const MAX_CHARS = 300;
 
+// --- CSRF ---
+
+// csrfHeaders returns the X-CSRF-Token header (read from the layout <meta> tag)
+// for attaching to plain fetch() calls. GET requests are exempt server-side.
+function csrfHeaders() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta && meta.content ? { 'X-CSRF-Token': meta.content } : {};
+}
+
+// Attach the CSRF token to every HTMX request. Harmless on GET (ignored server-side).
+document.body.addEventListener('htmx:configRequest', function(evt) {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    if (meta && meta.content) evt.detail.headers['X-CSRF-Token'] = meta.content;
+});
+
 function graphemeLength(str) {
     if (typeof Intl !== 'undefined' && Intl.Segmenter) {
         return [...new Intl.Segmenter().segment(str)].length;
@@ -160,7 +175,7 @@ async function submitPost() {
     try {
         const res = await fetch('/api/post', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
             body: JSON.stringify(body),
         });
 
@@ -369,7 +384,7 @@ async function saveReorder() {
     try {
         const res = await fetch('/api/templates/reorder', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
             body: JSON.stringify({ ids }),
         });
         if (res.ok) {

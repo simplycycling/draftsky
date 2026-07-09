@@ -383,26 +383,24 @@ in Docker (`docker start draftsky-dev-db`).
 - Following feed + merged hashtag feed + recent-tags rail + infinite scroll
 - Likes (with viewer state), image embeds, external link cards, avatars
 - Replies with correct AT Protocol threading (root/parent), reply preview in composer
+- Reposts with "Reposted by X" attribution and optimistic counts
+- Reply labels ("Replying to @handle") and full thread view (/thread, navigate-not-nest)
+- Saved feed tabs (pinned feeds from Bluesky preferences, Bluesky-style tab bar)
+- Quote post rendering (embed.record + recordWithMedia), compact quoted cards
+- Feed generator dedup (URI + reposter key) with unit tests
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
 
 ### Current priority order
-1. **Reposts** — `app.bsky.feed.repost` toggle alongside likes, plus "Reposted by X"
-   attribution on feed cards (from the timeline item's `reason` field,
-   `app.bsky.feed.defs#reasonRepost` — same feed-mapping code, same session)
-2. **Reply context + thread view** — "Replying to @handle" label on reply cards (from
-   the post's `reply` context); clicking a post opens the full thread view via
-   `app.bsky.feed.getPostThread` (root → intermediate replies → the clicked post and
-   its replies), Bluesky-style. New route/view; also delivers "click any post to see
-   its replies" for free.
-3. **Saved feeds (read-only)** — fetch the user's pinned/saved feeds; tabs across the
-   top of the centre column (Bluesky-style) to switch between them, alongside
-   Following and hashtag feeds
-4. **CSRF protection** — tokens on all state-mutating endpoints
-5. **Settings page + theme selector** — page scaffold; theme switching for paid users
+1. **CSRF protection** — tokens on all state-mutating endpoints
+2. **Notifications** — `app.bsky.notification.listNotifications`: a notifications view
+   (replies, likes, reposts, follows, quotes, mentions) plus an unread count badge on
+   a Notifications link in the left rail; `app.bsky.notification.updateSeen` to clear
+   the badge when the view is opened
+3. **Settings page + theme selector** — page scaffold; theme switching for paid users
    (server-side plan check; validate theme key against allowlist)
-6. **Free tier enforcement** — 5-template limit, `RequirePaidPlan` middleware; scope
+4. **Free tier enforcement** — 5-template limit, `RequirePaidPlan` middleware; scope
    trusted proxies to Railway's CIDR
 
 ### Post-GA / longer term
@@ -410,7 +408,6 @@ in Docker (`docker start draftsky-dev-db`).
   "See #tag posts" (existing hashtag feed), "See #tag posts by user" (needs author
   feeds), "Mute #tag" (needs a mutes table + feed filtering). Deferred until
   profiles/author feeds exist; plain click switches to the hashtag feed until then.
-- Notifications (listNotifications) + unread badge
 - Own profile view/edit; other user profiles (getProfile, getAuthorFeed)
 - Search (searchPosts, searchActors)
 - Bookmarks (local until AT Protocol supports natively)

@@ -55,6 +55,7 @@ type PageUser struct {
 type LayoutData struct {
 	User        PageUser
 	Theme       string
+	CSRFToken   string // double-submit token surfaced in the layout <meta> tag
 	RecentTags  []string
 	SavedFeeds  []feed.SavedFeed // pinned feeds for the tab bar; nil = no tabs
 	// Feed state
@@ -476,6 +477,7 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 			Avatar: avatar,
 		},
 		Theme:      theme,
+		CSRFToken:  auth.CSRFToken(sessionID, h.secret),
 		RecentTags: recentTags,
 		SavedFeeds: savedFeeds,
 	}
