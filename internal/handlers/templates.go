@@ -311,6 +311,16 @@ func (h *TemplateHandler) HandleDeleteTemplate(c *gin.Context) {
 		return
 	}
 
+	// HTMX 2.x treats 204 No Content as "no swap", which would suppress the
+	// hx-swap="delete" that removes the row from the DOM. For HTMX callers return
+	// 200 with an empty body so the swap fires; JSON API clients (e.g. the iOS
+	// app) keep the 204 REST contract. Branch on HX-Request so the two consumers'
+	// needs diverge without changing the API contract.
+	if c.GetHeader("HX-Request") != "" {
+		c.Status(http.StatusOK)
+		return
+	}
+
 	c.Status(http.StatusNoContent)
 }
 
