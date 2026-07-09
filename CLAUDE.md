@@ -354,6 +354,19 @@ draftsky/
     forward service doesn't do HTTPS and proved unreliable.
 12. **Gin route ordering.** Static segments must be registered before parameterised
     ones (`/api/templates/reorder` before `/api/templates/:id`).
+13. **`canPlayType()` returns 'maybe' (truthy) for HLS on Chromium** — never use it to
+    choose the native path first. Order: hls.js/MSE first, native HLS fallback, error
+    panel last resort. hls.js is self-hosted at `/static/vendor/hls.min.js` (third-party
+    CDN was a reliability and Brave-Shields liability).
+14. **Media elements need `crossOrigin='anonymous'` before any src assignment** —
+    no-cors media fetches poison the HTTP cache with ACAO-less entries that CORB-block
+    hls.js's CORS XHRs later. The attribute is load-bearing; do not remove it.
+15. **hls.js: attach before load.** `loadSource` before `attachMedia` fetches playlists
+    but never schedules fragments (no MediaSource to feed) — silent stall at 0:00. Gate
+    `loadSource` on the `MEDIA_ATTACHED` event.
+16. **Code-walks don't catch lifecycle-ordering errors.** Anything involving an async
+    external library (hls.js, HTMX internals) needs one real browser execution before
+    it counts as verified. Status-code curls verify handlers, not DOM behaviour.
 
 ---
 
@@ -388,12 +401,16 @@ in Docker (`docker start draftsky-dev-db`).
 - Saved feed tabs (pinned feeds from Bluesky preferences, Bluesky-style tab bar)
 - Quote post rendering (embed.record + recordWithMedia), compact quoted cards
 - Feed generator dedup (URI + reposter key) with unit tests
+- Inline video playback (hls.js self-hosted, MSE-first, full teardown, error panel)
+- CSRF protection (HMAC per-session tokens, header + form fallback, middleware tests)
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
 
 ### Current priority order
-1. **CSRF protection** — tokens on all state-mutating endpoints
+1. **Feed tab display-name fallback** (small) — a saved feed whose name fails to
+   resolve via getFeedGenerators currently shows its raw `at://` URI as the tab label;
+   skip unresolvable feeds from the tab bar instead
 2. **Notifications** — `app.bsky.notification.listNotifications`: a notifications view
    (replies, likes, reposts, follows, quotes, mentions) plus an unread count badge on
    a Notifications link in the left rail; `app.bsky.notification.updateSeen` to clear
@@ -507,7 +524,7 @@ DraftSky uses a freemium model on web and an ad-supported + one-time purchase mo
 **Web:**
 - Free tier: up to 5 templates, Following feed, posting, replies, Ocean theme only
 - Paid tier: unlimited templates, all themes, tabbed hashtag feed (future)
-- Enforced via the `plan` column (enforcement pending — priority item 5)
+- Enforced via the `plan` column (enforcement pending — priority item 4)
 
 **iOS (future):**
 - Ads by default (AdMob or equivalent); non-consumable IAP via StoreKit 2 removes them
@@ -537,4 +554,5 @@ github.com/bluesky-social/indigo
 github.com/golang-migrate/migrate/v4
 golang.org/x/time/rate
 sqlc (CLI tool — see https://sqlc.dev)
+hls.js (self-hosted at /static/vendor/hls.min.js — do not reintroduce a CDN)
 ```

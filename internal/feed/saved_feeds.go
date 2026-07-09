@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
 )
@@ -44,11 +45,7 @@ func (c *Client) GetSavedFeeds(ctx context.Context, did, sessionID string) ([]Sa
 		return []SavedFeed{{DisplayName: "Following", IsTimeline: true}}, nil
 	}
 
-	type orderedItem struct {
-		value      string
-		isTimeline bool
-	}
-	var pinned []orderedItem
+	var pinned []pinnedFeed
 	var feedURIs []string
 
 	for _, item := range v2.Items {
@@ -57,11 +54,11 @@ func (c *Client) GetSavedFeeds(ctx context.Context, did, sessionID string) ([]Sa
 		}
 		switch item.Type {
 		case "timeline":
-			pinned = append(pinned, orderedItem{isTimeline: true})
+			pinned = append(pinned, pinnedFeed{isTimeline: true})
 		case "feed":
-			pinned = append(pinned, orderedItem{value: item.Value})
+			pinned = append(pinned, pinnedFeed{uri: item.Value})
 			feedURIs = append(feedURIs, item.Value)
-		// "list" is skipped
+			// "list" is skipped
 		}
 	}
 
@@ -76,6 +73,15 @@ func (c *Client) GetSavedFeeds(ctx context.Context, did, sessionID string) ([]Sa
 		if err != nil {
 			return nil, fmt.Errorf("getFeedGenerators: %w", err)
 		}
+		// getFeedGenerators omits feeds that are deleted or whose generator
+		// service is offline, so a shorter response than the request is expected
+		// for those. But it should never silently drop *valid* feeds — log a
+		// mismatch so we can tell an ordinary "feed gone" case apart from the
+		// batch call failing partway and dropping resolvable feeds too.
+		if len(gens.Feeds) != len(feedURIs) {
+			slog.Warn("getFeedGenerators returned fewer feeds than requested",
+				"requested", len(feedURIs), "resolved", len(gens.Feeds))
+		}
 		for _, g := range gens.Feeds {
 			if g != nil {
 				nameMap[g.Uri] = g.DisplayName
@@ -83,19 +89,39 @@ func (c *Client) GetSavedFeeds(ctx context.Context, did, sessionID string) ([]Sa
 		}
 	}
 
+	return resolveSavedFeeds(pinned, nameMap), nil
+}
+
+// pinnedFeed is a pinned saved feed extracted from preferences, before
+// display-name resolution. isTimeline marks the built-in Following timeline;
+// uri carries the AT URI for custom algorithm feeds.
+type pinnedFeed struct {
+	uri        string
+	isTimeline bool
+}
+
+// resolveSavedFeeds builds the ordered SavedFeed slice from the extracted pinned
+// feeds and the display-name map returned by getFeedGenerators. The timeline is
+// always kept. A custom feed whose URI is absent from nameMap, or resolves to an
+// empty display name, is skipped entirely rather than rendered as a tab labelled
+// with its raw at:// URI — such feeds are deleted or their generator service is
+// offline, so there is nothing usable to show. A WARN is logged per skip so we
+// can see how often it happens. Preference order is preserved.
+func resolveSavedFeeds(pinned []pinnedFeed, nameMap map[string]string) []SavedFeed {
 	result := make([]SavedFeed, 0, len(pinned))
 	for _, p := range pinned {
 		if p.isTimeline {
 			result = append(result, SavedFeed{DisplayName: "Following", IsTimeline: true})
-		} else {
-			name := nameMap[p.value]
-			if name == "" {
-				name = p.value // fallback to URI if name resolution failed
-			}
-			result = append(result, SavedFeed{URI: p.value, DisplayName: name})
+			continue
 		}
+		name := nameMap[p.uri]
+		if name == "" {
+			slog.Warn("saved feed unresolved; skipping from tab bar", "uri", p.uri)
+			continue
+		}
+		result = append(result, SavedFeed{URI: p.uri, DisplayName: name})
 	}
-	return result, nil
+	return result
 }
 
 // GetCustomFeed fetches a page of posts from a Bluesky algorithm feed via
