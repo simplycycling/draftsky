@@ -249,47 +249,93 @@ function loadHlsJs() {
     return _hlsLoaderPromise;
 }
 
-// Only one video plays at a time: starting a new one pauses the previous.
+// Only one inline video is ever active. These four move as a set: the <video>
+// element, its hls.js instance (null on the Safari native path), the .post-video
+// container, and the container's original thumbnail + play-overlay markup (kept so
+// the container can be reverted to its clickable poster state).
 let _activeVideo = null;
-function setActiveVideo(video) {
-    if (_activeVideo && _activeVideo !== video) _activeVideo.pause();
-    _activeVideo = video;
+let _activeHls = null;
+let _activeContainer = null;
+let _activeThumbHTML = null;
+
+// teardownActiveVideo stops the active video and fully releases its resources:
+// destroys the hls.js instance (freeing the MediaSource and network buffers) or,
+// on Safari's native path where there is no hls.js instance, clears the media
+// element's src and resets it. It then restores the container to its thumbnail +
+// play-overlay markup so re-clicking starts a fresh stream. No-op when idle.
+// Safe to call on a container already detached from the DOM (e.g. after a feed
+// swap): the innerHTML revert is simply moot in that case.
+function teardownActiveVideo() {
+    if (!_activeVideo) return;
+    _activeVideo.pause();
+    if (_activeHls) {
+        _activeHls.destroy();
+    } else {
+        // Safari native HLS: drop the source and reset the element's media state.
+        _activeVideo.removeAttribute('src');
+        try { _activeVideo.load(); } catch (_) {}
+    }
+    if (_activeContainer && _activeThumbHTML !== null) {
+        _activeContainer.innerHTML = _activeThumbHTML;
+        _activeContainer.classList.remove('post-video-playing');
+    }
+    _activeVideo = null;
+    _activeHls = null;
+    _activeContainer = null;
+    _activeThumbHTML = null;
 }
 
 // playInlineVideo replaces a .post-video thumbnail (identified by its data-hls
 // playlist URL) with a <video controls> element and starts playback. Called from
 // the thumbnail's onclick, which has already stopped propagation so thread
-// navigation doesn't fire. Native HLS (Safari) uses the playlist as src directly;
-// every other browser lazy-loads hls.js and attaches via MediaSource.
+// navigation doesn't fire. Any previously-playing video is fully torn down first,
+// so only one plays at a time and no hls.js instance is ever left orphaned. Native
+// HLS (Safari) uses the playlist as src directly; every other browser lazy-loads
+// hls.js and attaches via MediaSource.
 function playInlineVideo(container) {
     const playlist = container.dataset.hls;
     if (!playlist || container.querySelector('video')) return;
+
+    // Release whatever was playing before; this destroys its hls.js instance and
+    // reverts its container, guaranteeing one active stream at a time.
+    teardownActiveVideo();
+
+    const thumbHTML = container.innerHTML; // preserved so teardown can revert
 
     const video = document.createElement('video');
     video.controls = true;
     video.playsInline = true;
     video.setAttribute('playsinline', '');
-    // Pause any other playing video when this one starts.
-    video.addEventListener('play', () => setActiveVideo(video));
 
     // Swap the thumbnail + play overlay for the video element (identical box).
     container.innerHTML = '';
     container.appendChild(video);
     container.classList.add('post-video-playing');
 
+    // Register as active immediately (hls instance filled in below, if any) so a
+    // subsequent play or feed swap can tear this down even before the manifest loads.
+    _activeVideo = video;
+    _activeHls = null;
+    _activeContainer = container;
+    _activeThumbHTML = thumbHTML;
+
     // No autoplay attribute, but the user explicitly clicked, so start playback.
     const startPlayback = () => video.play().catch(() => {});
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari & iOS: native HLS, point src straight at the playlist.
+        // Safari & iOS: native HLS, point src straight at the playlist. No hls.js.
         video.src = playlist;
         startPlayback();
         return;
     }
 
     loadHlsJs().then(Hls => {
+        // A teardown may have fired while hls.js was loading (new play / feed swap);
+        // if so this video is no longer active — bail without creating an orphan.
+        if (_activeVideo !== video) return;
         if (Hls.isSupported()) {
             const hls = new Hls();
+            _activeHls = hls;
             hls.loadSource(playlist);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
@@ -298,10 +344,21 @@ function playInlineVideo(container) {
             startPlayback();
         }
     }).catch(() => {
+        if (_activeVideo !== video) return;
         video.src = playlist; // hls.js unavailable — may not play, but try
         startPlayback();
     });
 }
+
+// An HTMX feed swap (switching feeds, posting) replaces #feed-root's contents,
+// detaching the container that holds a playing video and orphaning its hls.js
+// instance. After any swap, if the active video is no longer in the document, tear
+// it down to release the MediaSource/network buffers. Append-only swaps (infinite
+// scroll) and unrelated swaps (like/repost buttons) leave the video connected, so
+// this correctly leaves it playing.
+document.body.addEventListener('htmx:afterSwap', function() {
+    if (_activeVideo && !_activeVideo.isConnected) teardownActiveVideo();
+});
 
 // --- Template management ---
 
