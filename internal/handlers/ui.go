@@ -172,6 +172,16 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 			}
 			return *s
 		},
+		// httpsURL returns u only when it is a well-formed https:// URL, else "".
+		// Used to gate video playlist URLs before they reach a data attribute: a
+		// non-https (or malformed) playlist is dropped so the card renders a static
+		// thumbnail with no playback wiring rather than an unusable/mixed-content src.
+		"httpsURL": func(u string) string {
+			if p, err := url.Parse(u); err == nil && p.Scheme == "https" && p.Host != "" {
+				return u
+			}
+			return ""
+		},
 	}
 
 	tmplHome, err := template.New("").Funcs(funcMap).ParseFiles(

@@ -36,6 +36,14 @@ type PostExternalLink struct {
 	Thumb       string `json:"thumb,omitempty"`
 }
 
+// PostVideo is an HLS video attached to a post (app.bsky.embed.video#view).
+type PostVideo struct {
+	Playlist    string  `json:"playlist"`     // HLS .m3u8 URL
+	Thumbnail   string  `json:"thumbnail,omitempty"`
+	Alt         string  `json:"alt,omitempty"`
+	AspectRatio float64 `json:"aspect_ratio,omitempty"` // width/height; 0 if unknown
+}
+
 // QuotedPost is a post embedded as a quote inside another post (app.bsky.embed.record#viewRecord).
 // Unavailable is true for NotFound/Blocked/Detached variants.
 type QuotedPost struct {
@@ -45,7 +53,10 @@ type QuotedPost struct {
 	IndexedAt    string            `json:"indexed_at"`
 	Images       []PostImage       `json:"images,omitempty"`
 	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
-	Unavailable  bool              `json:"unavailable,omitempty"`
+	// Video is thumbnail-only in a quoted post: Playlist is left empty and the quoted
+	// card renders only the thumbnail (clicking opens the quoted thread, no playback).
+	Video       *PostVideo `json:"video,omitempty"`
+	Unavailable bool       `json:"unavailable,omitempty"`
 }
 
 // PostView is the clean JSON representation of a single post in a feed.
@@ -65,6 +76,7 @@ type PostView struct {
 	RepostURI    string            `json:"repost_uri,omitempty"`
 	Images       []PostImage       `json:"images,omitempty"`
 	ExternalLink *PostExternalLink `json:"external_link,omitempty"`
+	Video        *PostVideo        `json:"video,omitempty"`
 	Quoted       *QuotedPost       `json:"quoted,omitempty"`
 	// ReplyRootURI / ReplyRootCID are populated from the post's own reply.root when
 	// the post is itself a reply. Empty for top-level posts.
@@ -306,6 +318,25 @@ func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags
 	return &FeedPage{Posts: all, NextCursor: nextCursor}, nil
 }
 
+// mapEmbedVideoView converts an EmbedVideo_View to a PostVideo. Returns nil for a nil
+// input. AspectRatio is width/height, or 0 when the ratio is unknown/degenerate.
+func mapEmbedVideoView(vv *appbsky.EmbedVideo_View) *PostVideo {
+	if vv == nil {
+		return nil
+	}
+	pv := &PostVideo{Playlist: vv.Playlist}
+	if vv.Thumbnail != nil {
+		pv.Thumbnail = *vv.Thumbnail
+	}
+	if vv.Alt != nil {
+		pv.Alt = *vv.Alt
+	}
+	if vv.AspectRatio != nil && vv.AspectRatio.Height > 0 {
+		pv.AspectRatio = float64(vv.AspectRatio.Width) / float64(vv.AspectRatio.Height)
+	}
+	return pv
+}
+
 // mapEmbedRecordView converts an EmbedRecord_View_Record union (the record half of a
 // quote-post embed) to a QuotedPost. Returns nil for non-post variants such as generator
 // views, list views, etc. Returns a QuotedPost with Unavailable=true for
@@ -370,6 +401,15 @@ func mapEmbedRecordView(record *appbsky.EmbedRecord_View_Record) *QuotedPost {
 				el.Thumb = *ext.Thumb
 			}
 			qp.ExternalLink = el
+		}
+		if em.EmbedVideo_View != nil && qp.Video == nil {
+			// Thumbnail-only inside a quote: keep the metadata but drop the playlist so
+			// the quoted card never offers inline playback (clicking opens the thread).
+			vid := mapEmbedVideoView(em.EmbedVideo_View)
+			if vid != nil {
+				vid.Playlist = ""
+				qp.Video = vid
+			}
 		}
 		// EmbedRecord_View in embeds would be a quote-of-a-quote — do not recurse.
 	}
@@ -449,6 +489,9 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 			}
 			v.ExternalLink = el
 		}
+		if vid := pv.Embed.EmbedVideo_View; vid != nil {
+			v.Video = mapEmbedVideoView(vid)
+		}
 		if pv.Embed.EmbedRecord_View != nil {
 			v.Quoted = mapEmbedRecordView(pv.Embed.EmbedRecord_View.Record)
 		}
@@ -475,6 +518,9 @@ func postViewFromBsky(pv *appbsky.FeedDefs_PostView) PostView {
 						el.Thumb = *ext.External.Thumb
 					}
 					v.ExternalLink = el
+				}
+				if vid := rwm.Media.EmbedVideo_View; vid != nil {
+					v.Video = mapEmbedVideoView(vid)
 				}
 			}
 			if rwm.Record != nil {

@@ -111,3 +111,93 @@ func TestMapFeedViewPosts_Dedup(t *testing.T) {
 		})
 	}
 }
+
+func strptr(s string) *string { return &s }
+
+// videoView builds an app.bsky.embed.video#view with a 16:9 aspect ratio.
+func videoView() *appbsky.EmbedVideo_View {
+	return &appbsky.EmbedVideo_View{
+		Cid:         "bafyvideo",
+		Playlist:    "https://video.bsky.app/watch/did:plc:x/bafyvideo/playlist.m3u8",
+		Thumbnail:   strptr("https://video.bsky.app/watch/did:plc:x/bafyvideo/thumbnail.jpg"),
+		Alt:         strptr("a clip"),
+		AspectRatio: &appbsky.EmbedDefs_AspectRatio{Width: 16, Height: 9},
+	}
+}
+
+func TestPostViewFromBsky_Video_DirectEmbed(t *testing.T) {
+	pv := postViewFromBsky(&appbsky.FeedDefs_PostView{
+		Uri: "at://did:plc:x/app.bsky.feed.post/1",
+		Cid: "cid1",
+		Embed: &appbsky.FeedDefs_PostView_Embed{
+			EmbedVideo_View: videoView(),
+		},
+	})
+	if pv.Video == nil {
+		t.Fatal("Video is nil, want populated")
+	}
+	if pv.Video.Playlist != "https://video.bsky.app/watch/did:plc:x/bafyvideo/playlist.m3u8" {
+		t.Errorf("Playlist = %q", pv.Video.Playlist)
+	}
+	if pv.Video.Thumbnail == "" || pv.Video.Alt != "a clip" {
+		t.Errorf("Thumbnail=%q Alt=%q", pv.Video.Thumbnail, pv.Video.Alt)
+	}
+	if got := pv.Video.AspectRatio; got < 1.77 || got > 1.78 {
+		t.Errorf("AspectRatio = %v, want ~1.777", got)
+	}
+}
+
+func TestPostViewFromBsky_Video_RecordWithMedia(t *testing.T) {
+	pv := postViewFromBsky(&appbsky.FeedDefs_PostView{
+		Uri: "at://did:plc:x/app.bsky.feed.post/2",
+		Cid: "cid2",
+		Embed: &appbsky.FeedDefs_PostView_Embed{
+			EmbedRecordWithMedia_View: &appbsky.EmbedRecordWithMedia_View{
+				Media: &appbsky.EmbedRecordWithMedia_View_Media{
+					EmbedVideo_View: videoView(),
+				},
+			},
+		},
+	})
+	if pv.Video == nil || pv.Video.Playlist == "" {
+		t.Fatal("Video not mapped from recordWithMedia media half")
+	}
+}
+
+func TestMapEmbedRecordView_Video_ThumbnailOnly(t *testing.T) {
+	qp := mapEmbedRecordView(&appbsky.EmbedRecord_View_Record{
+		EmbedRecord_ViewRecord: &appbsky.EmbedRecord_ViewRecord{
+			Uri: "at://did:plc:x/app.bsky.feed.post/q",
+			Author: &appbsky.ActorDefs_ProfileViewBasic{
+				Did:    "did:plc:x",
+				Handle: "quoted.bsky.social",
+			},
+			Embeds: []*appbsky.EmbedRecord_ViewRecord_Embeds_Elem{
+				{EmbedVideo_View: videoView()},
+			},
+		},
+	})
+	if qp == nil || qp.Video == nil {
+		t.Fatal("quoted Video is nil, want populated")
+	}
+	if qp.Video.Playlist != "" {
+		t.Errorf("quoted Video.Playlist = %q, want empty (thumbnail-only)", qp.Video.Playlist)
+	}
+	if qp.Video.Thumbnail == "" {
+		t.Error("quoted Video.Thumbnail is empty, want populated")
+	}
+}
+
+func TestMapEmbedVideoView_UnknownAspectRatio(t *testing.T) {
+	// Height 0 (or nil ratio) must yield AspectRatio 0, never a divide-by-zero.
+	got := mapEmbedVideoView(&appbsky.EmbedVideo_View{
+		Playlist:    "https://video.bsky.app/x.m3u8",
+		AspectRatio: &appbsky.EmbedDefs_AspectRatio{Width: 16, Height: 0},
+	})
+	if got.AspectRatio != 0 {
+		t.Errorf("AspectRatio = %v, want 0 for height=0", got.AspectRatio)
+	}
+	if mapEmbedVideoView(nil) != nil {
+		t.Error("mapEmbedVideoView(nil) should return nil")
+	}
+}

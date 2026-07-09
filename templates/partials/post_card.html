@@ -86,6 +86,19 @@
             </div>
         </a>
         {{end}}
+        {{if .Video}}
+        {{/* data-hls (not data-*uri/url/src*) sidesteps html/template's URL-context ZgotmplZ
+             heuristic — see Gotcha 1. httpsURL drops any non-https playlist. */}}
+        {{$hls := httpsURL .Video.Playlist}}
+        <div class="post-video{{if not $hls}} post-video-nolplay{{end}}"
+             {{if .Video.AspectRatio}}style="aspect-ratio:{{.Video.AspectRatio}}"{{end}}
+             {{if $hls}}data-hls="{{$hls}}" onclick="event.stopPropagation(); playInlineVideo(this)"{{end}}>
+            {{if .Video.Thumbnail}}
+            <img class="post-video-thumb" src="{{.Video.Thumbnail}}" alt="{{.Video.Alt}}" loading="lazy">
+            {{end}}
+            {{if $hls}}<div class="post-video-play" aria-hidden="true"></div>{{end}}
+        </div>
+        {{end}}
         {{if .Quoted}}
         {{if .Quoted.Unavailable}}
         <div class="quoted-card quoted-card-unavailable">
@@ -115,6 +128,16 @@
                     <img class="quoted-image" src="{{.Thumb}}" alt="{{.Alt}}" loading="lazy">
                 </a>
                 {{end}}
+            </div>
+            {{end}}
+            {{if .Quoted.Video}}
+            {{/* Thumbnail-only inside a quote: no playback, clicking the card opens the thread. */}}
+            <div class="post-video post-video-nolplay quoted-video"
+                 {{if .Quoted.Video.AspectRatio}}style="aspect-ratio:{{.Quoted.Video.AspectRatio}}"{{end}}>
+                {{if .Quoted.Video.Thumbnail}}
+                <img class="post-video-thumb" src="{{.Quoted.Video.Thumbnail}}" alt="{{.Quoted.Video.Alt}}" loading="lazy">
+                {{end}}
+                <div class="post-video-play" aria-hidden="true"></div>
             </div>
             {{end}}
             {{if .Quoted.ExternalLink}}

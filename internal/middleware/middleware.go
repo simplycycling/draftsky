@@ -15,10 +15,17 @@ import (
 // TODO: migrate script-src and style-src to CSP nonces to remove 'unsafe-inline'.
 func SecurityHeaders() gin.HandlerFunc {
 	const csp = "default-src 'self'; " +
+		// script-src: app.js + HTMX (unpkg) + lazy-loaded hls.js (also unpkg, same CDN family).
 		"script-src 'self' 'unsafe-inline' https://unpkg.com; " +
 		"style-src 'self' 'unsafe-inline'; " +
+		// img-src: avatars/thumbnails on cdn.bsky.app; https: covers video thumbnails too.
 		"img-src 'self' https://cdn.bsky.app https:; " +
-		"connect-src 'self'; " +
+		// connect-src: hls.js fetches the .m3u8 playlist and .ts/.m4s segments from the
+		// Bluesky video CDN (both hostnames seen in the wild).
+		"connect-src 'self' https://video.bsky.app https://video.cdn.bsky.app; " +
+		// media-src: blob: for the MediaSource stream hls.js feeds the <video> element;
+		// https: for Safari's native HLS playing the playlist URL directly as video src.
+		"media-src blob: https:; " +
 		"frame-ancestors 'none'"
 	return func(c *gin.Context) {
 		c.Header("X-Content-Type-Options", "nosniff")

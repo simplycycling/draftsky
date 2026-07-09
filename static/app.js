@@ -222,10 +222,85 @@ document.addEventListener('keydown', e => {
 function navigateToThread(evt, uri) {
     if (!uri) return;
     const blocked = evt.target.closest(
-        '.post-count, .post-hashtag, .link-card, .post-image-link, .quoted-card, a, button'
+        '.post-count, .post-hashtag, .link-card, .post-image-link, .quoted-card, .post-video, a, button'
     );
     if (blocked) return;
     window.location.href = '/thread?uri=' + encodeURIComponent(uri);
+}
+
+// --- Inline video playback ---
+
+// hls.js on unpkg — same CDN family as HTMX (see the CSP script-src allowlist).
+const HLS_JS_SRC = 'https://unpkg.com/hls.js@1/dist/hls.min.js';
+let _hlsLoaderPromise = null;
+
+// loadHlsJs injects the hls.js <script> on first call and caches the promise so
+// subsequent plays reuse the already-loaded library. Resolves with the Hls global.
+function loadHlsJs() {
+    if (window.Hls) return Promise.resolve(window.Hls);
+    if (_hlsLoaderPromise) return _hlsLoaderPromise;
+    _hlsLoaderPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = HLS_JS_SRC;
+        s.onload = () => window.Hls ? resolve(window.Hls) : reject(new Error('Hls global missing'));
+        s.onerror = () => { _hlsLoaderPromise = null; reject(new Error('failed to load hls.js')); };
+        document.head.appendChild(s);
+    });
+    return _hlsLoaderPromise;
+}
+
+// Only one video plays at a time: starting a new one pauses the previous.
+let _activeVideo = null;
+function setActiveVideo(video) {
+    if (_activeVideo && _activeVideo !== video) _activeVideo.pause();
+    _activeVideo = video;
+}
+
+// playInlineVideo replaces a .post-video thumbnail (identified by its data-hls
+// playlist URL) with a <video controls> element and starts playback. Called from
+// the thumbnail's onclick, which has already stopped propagation so thread
+// navigation doesn't fire. Native HLS (Safari) uses the playlist as src directly;
+// every other browser lazy-loads hls.js and attaches via MediaSource.
+function playInlineVideo(container) {
+    const playlist = container.dataset.hls;
+    if (!playlist || container.querySelector('video')) return;
+
+    const video = document.createElement('video');
+    video.controls = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    // Pause any other playing video when this one starts.
+    video.addEventListener('play', () => setActiveVideo(video));
+
+    // Swap the thumbnail + play overlay for the video element (identical box).
+    container.innerHTML = '';
+    container.appendChild(video);
+    container.classList.add('post-video-playing');
+
+    // No autoplay attribute, but the user explicitly clicked, so start playback.
+    const startPlayback = () => video.play().catch(() => {});
+
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari & iOS: native HLS, point src straight at the playlist.
+        video.src = playlist;
+        startPlayback();
+        return;
+    }
+
+    loadHlsJs().then(Hls => {
+        if (Hls.isSupported()) {
+            const hls = new Hls();
+            hls.loadSource(playlist);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
+        } else {
+            video.src = playlist; // last resort
+            startPlayback();
+        }
+    }).catch(() => {
+        video.src = playlist; // hls.js unavailable — may not play, but try
+        startPlayback();
+    });
 }
 
 // --- Template management ---

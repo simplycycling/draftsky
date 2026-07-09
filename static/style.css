@@ -601,6 +601,78 @@ button {
     border-radius: var(--radius);
 }
 
+/* ---- Post video ---- */
+
+/* Thumbnail + centred play overlay; same 480px cap as images, aspect-ratio
+   respected inline where known. Turns into a <video> element on click. */
+.post-video {
+    position: relative;
+    display: block;
+    margin-top: 8px;
+    margin-left: 46px;
+    max-width: 100%;
+    max-height: 480px;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #000;
+    cursor: pointer;
+}
+
+.post-video-thumb {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    object-fit: cover;
+    object-position: center;
+}
+
+/* Circular play button drawn with a CSS triangle — no image asset. */
+.post-video-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    pointer-events: none;
+}
+
+.post-video-play::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 54%;
+    transform: translate(-50%, -50%);
+    border-style: solid;
+    border-width: 11px 0 11px 18px;
+    border-color: transparent transparent transparent #fff;
+}
+
+/* Non-playable variant (invalid playlist, or thumbnail inside a quote): no hover cursor. */
+.post-video-nolplay,
+.post-video-playing {
+    cursor: default;
+}
+
+/* The <video> element that replaces the thumbnail on play; inherits the cap. */
+.post-video video {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 480px;
+    background: #000;
+    border-radius: var(--radius);
+}
+
+.quoted-video {
+    margin-left: 0;
+    margin-top: 8px;
+}
+
 /* ---- External link card ---- */
 
 .link-card {
