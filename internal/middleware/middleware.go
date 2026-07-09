@@ -15,8 +15,10 @@ import (
 // TODO: migrate script-src and style-src to CSP nonces to remove 'unsafe-inline'.
 func SecurityHeaders() gin.HandlerFunc {
 	const csp = "default-src 'self'; " +
-		// script-src: app.js + HTMX (unpkg) + lazy-loaded hls.js (also unpkg, same CDN family).
-		"script-src 'self' 'unsafe-inline' https://unpkg.com; " +
+		// script-src: app.js, HTMX, and lazy-loaded hls.js — all self-hosted from
+		// static/vendor. No third-party CDN: an unpkg outage or a Brave Shields /
+		// ad-blocker rule blocking it would break HTMX and video, so we serve our own.
+		"script-src 'self' 'unsafe-inline'; " +
 		"style-src 'self' 'unsafe-inline'; " +
 		// img-src: avatars/thumbnails on cdn.bsky.app; https: covers video thumbnails too.
 		"img-src 'self' https://cdn.bsky.app https:; " +

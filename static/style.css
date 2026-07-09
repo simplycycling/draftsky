@@ -668,6 +668,24 @@ button {
     border-radius: var(--radius);
 }
 
+/* Fallback panel shown when a stream can't load (fatal hls.js error, media error,
+   or a CDN blocked by Brave Shields / an ad-blocker) instead of a black box. */
+.post-video-errored {
+    cursor: pointer;
+}
+
+.post-video-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    padding: 24px;
+    background: var(--color-card);
+    color: var(--color-muted);
+    font-size: 0.9rem;
+    text-align: center;
+}
+
 .quoted-video {
     margin-left: 0;
     margin-top: 8px;

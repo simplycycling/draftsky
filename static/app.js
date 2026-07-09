@@ -230,8 +230,10 @@ function navigateToThread(evt, uri) {
 
 // --- Inline video playback ---
 
-// hls.js on unpkg — same CDN family as HTMX (see the CSP script-src allowlist).
-const HLS_JS_SRC = 'https://unpkg.com/hls.js@1/dist/hls.min.js';
+// hls.js is self-hosted from our own origin (static/vendor/hls.min.js, v1.6.16).
+// A third-party CDN was a reliability liability (outage = no video) and got blocked
+// by Brave Shields / ad-blockers; serving from 'self' sidesteps both.
+const HLS_JS_SRC = '/static/vendor/hls.min.js';
 let _hlsLoaderPromise = null;
 
 // loadHlsJs injects the hls.js <script> on first call and caches the promise so
@@ -285,6 +287,26 @@ function teardownActiveVideo() {
     _activeThumbHTML = null;
 }
 
+// showVideoError replaces a failed player with a muted "Video failed to load"
+// panel instead of an eternal black box. Covers both a fatal hls.js error and a
+// media-element 'error' event (native HLS, last-resort src, or a CDN blocked by
+// Brave Shields / an ad-blocker). If the failed container is the active one, its
+// resources are released first (hls destroyed, active slots cleared) so the panel
+// can be re-clicked to retry a fresh stream. The container keeps its data-hls +
+// onclick, so clicking the panel calls playInlineVideo again.
+function showVideoError(container) {
+    if (_activeContainer === container) {
+        if (_activeHls) { try { _activeHls.destroy(); } catch (_) {} }
+        _activeVideo = null;
+        _activeHls = null;
+        _activeContainer = null;
+        _activeThumbHTML = null;
+    }
+    container.classList.remove('post-video-playing');
+    container.classList.add('post-video-errored');
+    container.innerHTML = '<div class="post-video-error">Video failed to load</div>';
+}
+
 // playInlineVideo replaces a .post-video thumbnail (identified by its data-hls
 // playlist URL) with a <video controls> element and starts playback. Called from
 // the thumbnail's onclick, which has already stopped propagation so thread
@@ -303,9 +325,22 @@ function playInlineVideo(container) {
     const thumbHTML = container.innerHTML; // preserved so teardown can revert
 
     const video = document.createElement('video');
+    // LOAD-BEARING — do not remove as "unnecessary". Bluesky's video CDN serves
+    // segments/playlists with Access-Control-Allow-Origin, but a non-CORS media
+    // fetch (a plain video.src load) caches the response WITHOUT that header. hls.js
+    // then issues CORS XHRs for the same URLs, hits those poisoned cache entries,
+    // and the browser CORB-blocks them — playback silently dies until the cache is
+    // cleared. Forcing crossOrigin here makes even direct-src loads CORS-mode, so
+    // every cache entry carries ACAO and hls.js's XHRs are always satisfiable.
+    video.crossOrigin = 'anonymous';
     video.controls = true;
     video.playsInline = true;
     video.setAttribute('playsinline', '');
+    // Surface a hard media failure (native HLS path, last-resort src, or a CDN
+    // blocked by Brave Shields / an ad-blocker) instead of leaving a black box.
+    video.addEventListener('error', () => {
+        if (_activeVideo === video) showVideoError(container);
+    });
 
     // Swap the thumbnail + play overlay for the video element (identical box).
     container.innerHTML = '';
@@ -322,31 +357,61 @@ function playInlineVideo(container) {
     // No autoplay attribute, but the user explicitly clicked, so start playback.
     const startPlayback = () => video.play().catch(() => {});
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari & iOS: native HLS, point src straight at the playlist. No hls.js.
-        video.src = playlist;
-        startPlayback();
-        return;
-    }
+    // playNative points the media element straight at the playlist, relying on the
+    // browser's built-in HLS decoder. This is the LAST resort, not the first choice:
+    // Chromium/Brave report canPlayType('application/vnd.apple.mpegurl') === 'maybe'
+    // (truthy) but cannot actually decode HLS, so preferring native there sets an
+    // unplayable src and playback silently dies. Only browsers that both lack MSE
+    // (Hls.isSupported() false) AND claim native support ('probably'/'maybe') take
+    // this path — in practice iOS Safari, whose native HLS genuinely works.
+    const playNative = () => {
+        const nativeSupport = video.canPlayType('application/vnd.apple.mpegurl');
+        if (nativeSupport === 'probably' || nativeSupport === 'maybe') {
+            video.src = playlist;
+            startPlayback();
+        } else {
+            // Neither MSE nor real native HLS — never assign an unplayable src.
+            showVideoError(container);
+        }
+    };
 
+    // Prefer hls.js (MSE) whenever it can run — this is the standard hls.js
+    // integration order and is what desktop Safari uses too when MSE is available.
+    // Native HLS is only the fallback when hls.js is unsupported or fails to load.
     loadHlsJs().then(Hls => {
-        // A teardown may have fired while hls.js was loading (new play / feed swap);
-        // if so this video is no longer active — bail without creating an orphan.
+        // Abort only a genuinely stale load: a teardown that fired while hls.js was
+        // loading (new play / feed swap) nulls or reassigns _activeVideo, so this
+        // element is no longer the active one. On a clean first click _activeVideo
+        // was set to this same <video> synchronously above, so the guard passes.
         if (_activeVideo !== video) return;
         if (Hls.isSupported()) {
             const hls = new Hls();
             _activeHls = hls;
-            hls.loadSource(playlist);
-            hls.attachMedia(video);
+            // Fatal hls.js errors (network/media/mux) can't recover — show the error
+            // panel rather than a silent, never-buffering black box.
+            hls.on(Hls.Events.ERROR, (_evt, data) => {
+                if (data && data.fatal) {
+                    console.error('hls fatal', data.type, data.details);
+                    if (_activeVideo === video) showVideoError(container);
+                }
+            });
             hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
+            // Attach the media element FIRST, then load the source only once the
+            // MediaSource is bound (MEDIA_ATTACHED). Calling loadSource before the
+            // media is attached lets hls.js fetch the master + media playlists but
+            // leaves the stream controller with no MediaSource to schedule fragments
+            // against — the "playlists load, zero fragment requests" hang. Gating
+            // loadSource on MEDIA_ATTACHED guarantees fragments are always scheduled.
+            hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(playlist));
+            hls.attachMedia(video);
         } else {
-            video.src = playlist; // last resort
-            startPlayback();
+            // No MSE (e.g. iOS Safari): fall back to native HLS if it's real.
+            playNative();
         }
     }).catch(() => {
+        // hls.js unavailable (offline, blocked): native HLS is the only hope.
         if (_activeVideo !== video) return;
-        video.src = playlist; // hls.js unavailable — may not play, but try
-        startPlayback();
+        playNative();
     });
 }
 

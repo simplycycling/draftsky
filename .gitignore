@@ -8,7 +8,9 @@
 # Go
 *.test
 *.out
-vendor/
+# Anchored to repo root so it only ignores Go module vendoring,
+# not static/vendor/ (self-hosted htmx + hls.js, which must be committed).
+/vendor/
 
 # OS
 .DS_Store
