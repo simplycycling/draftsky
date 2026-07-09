@@ -115,10 +115,25 @@ func (c *Client) resumeAPIClient(ctx context.Context, did, sessionID string) (*a
 // Used by GetFollowingFeed and GetCustomFeed.
 func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost) []PostView {
 	posts := make([]PostView, 0, len(items))
+	// seen tracks dedup keys already emitted in this page. The key is the post URI
+	// plus the reposter DID (empty when the item is not a repost), so a post that
+	// appears once organically and once as someone's repost is kept — only items
+	// with identical keys (a feed generator returning the same entry twice) are dropped.
+	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if item == nil || item.Post == nil {
 			continue
 		}
+		var reposterDID string
+		if item.Reason != nil && item.Reason.FeedDefs_ReasonRepost != nil && item.Reason.FeedDefs_ReasonRepost.By != nil {
+			reposterDID = item.Reason.FeedDefs_ReasonRepost.By.Did
+		}
+		key := item.Post.Uri + "\x00" + reposterDID
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+
 		pv := postViewFromBsky(item.Post)
 		if item.Reason != nil && item.Reason.FeedDefs_ReasonRepost != nil {
 			r := item.Reason.FeedDefs_ReasonRepost
