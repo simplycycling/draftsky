@@ -3,8 +3,11 @@ package bluesky
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -30,6 +33,25 @@ func IsRateLimitError(err error) bool {
 // It is anchored to either the start of string or a whitespace boundary so that
 // URLs like https://example.com/#anchor are not treated as hashtags.
 var hashtagRe = regexp.MustCompile(`(?:^|[\s])(#[^\d\s]\S*)`)
+
+// mentionRe matches @-mentions of domain-form handles (e.g. @rustypants.com,
+// @user.bsky.social). Like hashtagRe it is anchored to the start of string or a
+// whitespace boundary so the '@' must begin the token — this excludes email
+// addresses (a@b.com) and mid-word '@'. A handle is two or more dot-joined
+// segments of [a-zA-Z0-9-], so a bare '@foo' (no domain) is not matched. Group 1
+// is the whole "@handle" token; trailing punctuation is stripped afterwards just
+// as hashtags are.
+var mentionRe = regexp.MustCompile(`(?:^|[\s])(@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)`)
+
+// mentionResolveTimeout bounds each individual com.atproto.identity.resolveHandle
+// lookup so a slow or unreachable PDS cannot stall a post. A handle that does not
+// resolve within this window is treated as unresolved and left as plain text.
+const mentionResolveTimeout = 3 * time.Second
+
+// handleResolver resolves a bare handle (no leading '@') to a DID. It is injected
+// into buildFacets so mention-facet construction can be unit-tested without a live
+// PDS. The production implementation wraps com.atproto.identity.resolveHandle.
+type handleResolver func(ctx context.Context, handle string) (string, error)
 
 // Poster wraps the OAuth client and handles posting to Bluesky.
 type Poster struct {
@@ -84,7 +106,18 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 	}
 	fullText = strings.TrimSpace(fullText)
 
-	facets := buildHashtagFacets(fullText)
+	apiClient := sess.APIClient()
+
+	// Facet detection runs on the combined body+suffix text, so a mention that
+	// lives in a template suffix (e.g. a collab template) is annotated too.
+	resolve := func(ctx context.Context, handle string) (string, error) {
+		out, err := comatproto.IdentityResolveHandle(ctx, apiClient, handle)
+		if err != nil {
+			return "", err
+		}
+		return out.Did, nil
+	}
+	facets := buildFacets(ctx, fullText, resolve)
 
 	post := &appbsky.FeedPost{
 		Text:      fullText,
@@ -105,7 +138,6 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 		}
 	}
 
-	apiClient := sess.APIClient()
 	out, err := comatproto.RepoCreateRecord(ctx, apiClient, &comatproto.RepoCreateRecord_Input{
 		Collection: "app.bsky.feed.post",
 		Repo:       didStr,
@@ -173,6 +205,124 @@ func buildHashtagFacets(text string) []*appbsky.RichtextFacet {
 				{
 					RichtextFacet_Tag: &appbsky.RichtextFacet_Tag{
 						Tag: tagVal,
+					},
+				},
+			},
+		})
+	}
+	return facets
+}
+
+// buildFacets returns the full facet slice for text: hashtags plus resolved
+// @-mentions, sorted ascending by byte offset. Hashtag and mention tokens cannot
+// overlap by construction (one begins with '#', the other with '@'), but the
+// official client emits facets in byte order so we sort to match.
+func buildFacets(ctx context.Context, text string, resolve handleResolver) []*appbsky.RichtextFacet {
+	facets := buildHashtagFacets(text)
+	facets = append(facets, buildMentionFacets(ctx, text, resolve)...)
+	sort.Slice(facets, func(i, j int) bool {
+		return facets[i].Index.ByteStart < facets[j].Index.ByteStart
+	})
+	return facets
+}
+
+// mentionMatch is a detected @-mention: the UTF-8 byte range of the "@handle"
+// token in the source text and the bare handle (no leading '@').
+type mentionMatch struct {
+	start  int
+	end    int
+	handle string
+}
+
+// detectMentions finds @-mention tokens in text and returns their byte offsets
+// and handles. Byte offsets come straight from FindAllStringSubmatchIndex (UTF-8
+// byte indices — Gotcha 6), so an emoji earlier in the text does not corrupt them.
+// Trailing punctuation is stripped exactly as hashtags strip it.
+func detectMentions(text string) []mentionMatch {
+	textBytes := []byte(text)
+	idxs := mentionRe.FindAllStringSubmatchIndex(text, -1)
+
+	var out []mentionMatch
+	for _, m := range idxs {
+		// m[2]/m[3] are the byte indices of capture group 1 — the "@handle".
+		start, end := m[2], m[3]
+
+		token := string(textBytes[start:end])
+		token = strings.TrimRight(token, ".,!?;:'\")")
+		end = start + len(token)
+
+		handle := strings.TrimPrefix(token, "@")
+		if handle == "" {
+			continue
+		}
+		out = append(out, mentionMatch{start: start, end: end, handle: handle})
+	}
+	return out
+}
+
+// buildMentionFacets detects @-mentions in text, resolves each unique handle to a
+// DID concurrently (bounded by the small number of mentions in a post; one lookup
+// per unique handle, so the same handle twice costs one resolution), and returns a
+// mention facet for every handle that resolved. A handle that fails to resolve
+// (NXDOMAIN, deleted account, typo, timeout) is logged at INFO and left as plain
+// text — never failing the post, matching Bluesky's own behaviour.
+func buildMentionFacets(ctx context.Context, text string, resolve handleResolver) []*appbsky.RichtextFacet {
+	matches := detectMentions(text)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	// Per-request dedup: resolve each distinct handle exactly once.
+	unique := make(map[string]struct{}, len(matches))
+	for _, m := range matches {
+		unique[m.handle] = struct{}{}
+	}
+
+	type resolution struct {
+		handle string
+		did    string
+		err    error
+	}
+	results := make(chan resolution, len(unique))
+	var wg sync.WaitGroup
+	for handle := range unique {
+		wg.Add(1)
+		go func(handle string) {
+			defer wg.Done()
+			rctx, cancel := context.WithTimeout(ctx, mentionResolveTimeout)
+			defer cancel()
+			did, err := resolve(rctx, handle)
+			results <- resolution{handle: handle, did: did, err: err}
+		}(handle)
+	}
+	wg.Wait()
+	close(results)
+
+	dids := make(map[string]string, len(unique))
+	for r := range results {
+		if r.err != nil {
+			slog.InfoContext(ctx, "mention handle did not resolve; left as plain text",
+				"handle", r.handle, "error", r.err)
+			continue
+		}
+		dids[r.handle] = r.did
+	}
+
+	var facets []*appbsky.RichtextFacet
+	for _, m := range matches {
+		did, ok := dids[m.handle]
+		if !ok {
+			continue
+		}
+		facets = append(facets, &appbsky.RichtextFacet{
+			Index: &appbsky.RichtextFacet_ByteSlice{
+				ByteStart: int64(m.start),
+				ByteEnd:   int64(m.end),
+			},
+			Features: []*appbsky.RichtextFacet_Features_Elem{
+				{
+					RichtextFacet_Mention: &appbsky.RichtextFacet_Mention{
+						Did: did,
 					},
 				},
 			},

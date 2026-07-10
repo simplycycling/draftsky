@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,15 @@ import (
 const uiFeedLimit = 20
 
 var uiHashtagRe = regexp.MustCompile(`#[^\s#<>&"']+`)
+
+// uiMentionRe matches @-mentions of domain-form handles for display highlighting.
+// It mirrors the outgoing-post mention regex: '@' must begin the token (start of
+// string or a whitespace boundary, so emails and mid-word '@' are excluded) and a
+// handle is two or more dot-joined [a-zA-Z0-9-] segments. Group 1 is the "@handle"
+// token, excluding the leading boundary character. This is a v1 display-only regex
+// pass over the post text — it does not consume the post's actual mention facet
+// byte ranges (PostView does not carry facets yet).
+var uiMentionRe = regexp.MustCompile(`(?:^|[\s])(@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)`)
 
 // atURIRe matches valid AT Protocol URIs (at://did/collection/rkey).
 // Used by safeAtURI to gate what we mark as template.URL.
@@ -113,31 +123,58 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		"safeAtURI": safeAtURI,
 		// urlquote percent-encodes a string for use in URL query parameters.
 		"urlquote": url.QueryEscape,
-		// highlightHashtags wraps hashtag tokens in a styled span.
-		// Runs the regex on plain text so that apostrophes and other punctuation
-		// are detected correctly, then escapes each segment exactly once before
-		// assembling the result. Returning template.HTML tells html/template not
-		// to apply a second round of escaping.
-		// highlightHashtags wraps hashtag tokens in a styled, clickable span.
-		// Runs the regex on plain text so that apostrophes and other punctuation
-		// are detected correctly, then escapes each segment exactly once before
-		// assembling the result. Each span gets an onclick that stops propagation
-		// (so the card-level navigateToThread never fires) and switches the feed
-		// via switchToHashtagFeed. JSEscapeString guards the tag name embedded
-		// inside the JS string literal; HTMLEscapeString handles display text.
-		// Returning template.HTML tells html/template not to double-escape.
-		"highlightHashtags": func(text string) template.HTML {
+		// highlightFacets wraps hashtag and @-mention tokens in styled spans.
+		// Runs both regexes on plain text (so apostrophes and other punctuation are
+		// detected correctly), merges the matches in byte order, then escapes each
+		// segment exactly once before assembling the result (Gotcha 5 — escaping
+		// first would corrupt offsets and double-escape). Returning template.HTML
+		// tells html/template not to apply a second round of escaping.
+		//
+		// Hashtag spans get an onclick that stops propagation (so the card-level
+		// navigateToThread never fires) and switches the feed via
+		// switchToHashtagFeed; JSEscapeString guards the tag name inside the JS
+		// string literal. Mention spans are display-only for now — non-clickable
+		// (cursor: default) and deliberately WITHOUT stopPropagation so a click
+		// still falls through to the card's thread navigation. Profiles (future)
+		// will make mentions clickable; at that point they can consume the post's
+		// real mention facets rather than this display-text regex pass.
+		"highlightFacets": func(text string) template.HTML {
+			type span struct {
+				start, end int
+				mention    bool
+			}
+			var spans []span
+			for _, m := range uiHashtagRe.FindAllStringIndex(text, -1) {
+				spans = append(spans, span{start: m[0], end: m[1]})
+			}
+			for _, m := range uiMentionRe.FindAllStringSubmatchIndex(text, -1) {
+				// m[2]/m[3] bound capture group 1 — the "@handle", excluding the
+				// leading boundary whitespace.
+				spans = append(spans, span{start: m[2], end: m[3], mention: true})
+			}
+			sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+
 			var buf strings.Builder
 			last := 0
-			for _, m := range uiHashtagRe.FindAllStringIndex(text, -1) {
-				buf.WriteString(template.HTMLEscapeString(text[last:m[0]]))
-				tag := template.JSEscapeString(text[m[0]+1 : m[1]]) // strip '#', JS-escape
-				buf.WriteString(`<span class="post-hashtag" onclick="event.stopPropagation();switchToHashtagFeed(['`)
-				buf.WriteString(tag)
-				buf.WriteString(`'])">`)
-				buf.WriteString(template.HTMLEscapeString(text[m[0]:m[1]]))
-				buf.WriteString(`</span>`)
-				last = m[1]
+			for _, s := range spans {
+				if s.start < last {
+					continue // defensive: skip any overlap
+				}
+				buf.WriteString(template.HTMLEscapeString(text[last:s.start]))
+				token := text[s.start:s.end]
+				if s.mention {
+					buf.WriteString(`<span class="post-mention">`)
+					buf.WriteString(template.HTMLEscapeString(token))
+					buf.WriteString(`</span>`)
+				} else {
+					tag := template.JSEscapeString(token[1:]) // strip '#', JS-escape
+					buf.WriteString(`<span class="post-hashtag" onclick="event.stopPropagation();switchToHashtagFeed(['`)
+					buf.WriteString(tag)
+					buf.WriteString(`'])">`)
+					buf.WriteString(template.HTMLEscapeString(token))
+					buf.WriteString(`</span>`)
+				}
+				last = s.end
 			}
 			buf.WriteString(template.HTMLEscapeString(text[last:]))
 			return template.HTML(buf.String())

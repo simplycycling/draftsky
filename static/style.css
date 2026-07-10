@@ -481,6 +481,14 @@ button {
     text-decoration: underline;
 }
 
+/* Mentions are accent-coloured but not yet interactive — profiles (future) will
+   make them clickable. Default cursor signals there is no click target today. */
+.post-mention {
+    color: var(--color-accent);
+    font-weight: 500;
+    cursor: default;
+}
+
 .post-meta {
     margin-left: 46px;
     display: flex;
