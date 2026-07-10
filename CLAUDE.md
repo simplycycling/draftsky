@@ -98,11 +98,15 @@ Do not introduce React, Vue, or any npm-based frontend toolchain. Vanilla JS is
 acceptable for small enhancements and lives in `/static/app.js`.
 
 ### Bluesky posts use facets
-Hashtags in Bluesky are not plain text — they are `facets` in the `app.bsky.feed.post`
-lexicon (rich text byte-range annotations). Always construct posts using the indigo
-library and the existing helpers in `internal/bluesky/bluesky.go` (`buildHashtagFacets`,
-`ExtractHashtags`), never by naive string concatenation. Byte offsets are UTF-8 byte
-positions, not rune positions.
+Hashtags and mentions in Bluesky are not plain text — they are `facets` in the
+`app.bsky.feed.post` lexicon (rich text byte-range annotations). Always construct posts
+using the indigo library and the existing helpers in `internal/bluesky/bluesky.go`
+(`buildFacets` — hashtags + mentions, byte-sorted; `ExtractHashtags`), never by naive
+string concatenation. Byte offsets are UTF-8 byte positions, not rune positions.
+Mentions: boundary-anchored regex (the `@` must begin the token, so emails never
+match), concurrent handle→DID resolution (3s timeout, per-request dedup), unresolvable
+handles stay plain text (INFO log, never fail the post). Facet detection runs on the
+combined body + template suffix, so suffix mentions work (collab templates).
 
 ### Replies use AT Protocol threading
 Replies require a `reply` object with both `root` and `parent` `{uri, cid}` StrongRefs.
@@ -367,16 +371,13 @@ draftsky/
 16. **Code-walks don't catch lifecycle-ordering errors.** Anything involving an async
     external library (hls.js, HTMX internals) needs one real browser execution before
     it counts as verified. Status-code curls verify handlers, not DOM behaviour.
-17. **`hx-on::*` is dead under our CSP.** HTMX evaluates `hx-on` attribute bodies with
-    `new Function()`, which our CSP (`script-src 'self' 'unsafe-inline'` — no
-    `'unsafe-eval'`) blocks. The failure is *silent*: a CSP `EvalError` prints to the
-    console but HTMX carries on — the request fires, the swap still happens, only the
-    handler body is skipped. So a broken `hx-on` looks like it works until you notice
-    the after-response side effect (inline error, input reset, repaint) never ran.
-    Never use `hx-on`; wire a single delegated `htmx:afterRequest` (or other `htmx:*`)
-    listener in app.js, keyed off `evt.detail.elt` (id or a `data-` attribute), and
-    dispatch to named functions. The request stays in the element's `hx-*` attributes.
-    Same trap for `hx-vals="js:…"` (also eval-based) — plain-JSON `hx-vals` is fine.
+17. **`hx-on` bodies are dead under our CSP.** HTMX evaluates `hx-on::*` attribute
+    bodies with `new Function()`, which the no-'unsafe-eval' CSP blocks. The failure
+    is silent: the EvalError prints to console but HTMX carries on — the request fires
+    and the swap happens, only the handler body is skipped, so it looks like it works
+    until a side effect (error rendering, input clearing) never runs. Use delegated
+    `htmx:*` listeners in app.js instead (one `htmx:afterRequest` dispatcher keyed on
+    `evt.detail.elt`). Plain-JSON `hx-vals` is fine; `hx-vals="js:..."` would not be.
 
 ---
 
@@ -408,27 +409,29 @@ in Docker (`docker start draftsky-dev-db`).
 - Replies with correct AT Protocol threading (root/parent), reply preview in composer
 - Reposts with "Reposted by X" attribution and optimistic counts
 - Reply labels ("Replying to @handle") and full thread view (/thread, navigate-not-nest)
-- Saved feed tabs (pinned feeds from Bluesky preferences, Bluesky-style tab bar)
+- Saved feed tabs (pinned feeds from Bluesky preferences, Bluesky-style tab bar;
+  unresolvable feeds skipped with two-level WARN observability)
 - Quote post rendering (embed.record + recordWithMedia), compact quoted cards
 - Feed generator dedup (URI + reposter key) with unit tests
 - Inline video playback (hls.js self-hosted, MSE-first, full teardown, error panel)
 - CSRF protection (HMAC per-session tokens, header + form fallback, middleware tests)
+- Notifications: /notifications view, per-reason click-through, left-rail badge with
+  60s polling (paused when tab hidden), JSON endpoints for iOS
+- Settings page + theme selector (server-side paid check, instant repaint, free-user
+  fallback verified live)
+- hx-on → delegated listeners (CSP regression fix: 409 errors + inline-edit errors
+  were silently invisible in production)
+- @-mentions: outgoing mention facets (concurrent handle resolution, suffix mentions,
+  emails excluded), incoming mentions accent-rendered in feeds
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
 
-### Current priority order
-1. **Feed tab display-name fallback** (small) — a saved feed whose name fails to
-   resolve via getFeedGenerators currently shows its raw `at://` URI as the tab label;
-   skip unresolvable feeds from the tab bar instead
-2. **Notifications** — `app.bsky.notification.listNotifications`: a notifications view
-   (replies, likes, reposts, follows, quotes, mentions) plus an unread count badge on
-   a Notifications link in the left rail; `app.bsky.notification.updateSeen` to clear
-   the badge when the view is opened
-3. **Settings page + theme selector** — page scaffold; theme switching for paid users
-   (server-side plan check; validate theme key against allowlist)
-4. **Free tier enforcement** — 5-template limit, `RequirePaidPlan` middleware; scope
-   trusted proxies to Railway's CIDR
+### Current priority order (final GA item)
+1. **Free tier enforcement** — 5-template limit on POST /api/templates (server-side,
+   403/409 with a clear message when a free user has 5), `RequirePaidPlan` middleware
+   for future paid-only endpoints; scope trusted proxies to Railway's CIDR (replace
+   the 0.0.0.0/0 placeholder). After this: GA.
 
 ### Post-GA / longer term
 - **Hashtag activity counter** (small) — when the post-submit hashtag feed appears,
@@ -448,7 +451,12 @@ in Docker (`docker start draftsky-dev-db`).
   "See #tag posts" (existing hashtag feed), "See #tag posts by user" (needs author
   feeds), "Mute #tag" (needs a mutes table + feed filtering). Deferred until
   profiles/author feeds exist; plain click switches to the hashtag feed until then.
-- Own profile view/edit; other user profiles (getProfile, getAuthorFeed)
+- Own profile view/edit; other user profiles (getProfile, getAuthorFeed) — also
+  unlocks: clickable mentions in feeds, mention typeahead in the composer
+  (searchActorsTypeahead: debounced input, dropdown, keyboard nav, insert-on-select),
+  and the hashtag context menu
+- Browser Notifications API on top of the unread poll (opt-in from settings; OS-level
+  notification when count rises while tab unfocused)
 - Search (searchPosts, searchActors)
 - Bookmarks (local until AT Protocol supports natively)
 - Photo posting (uploadBlob)
