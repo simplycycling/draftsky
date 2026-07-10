@@ -29,6 +29,10 @@
 
             <nav class="nav">
                 <a href="/" class="nav-link">Home</a>
+                <a href="/notifications" class="nav-link nav-link-notifications">
+                    Notifications
+                    {{if gt .UnreadCount 0}}<span class="nav-badge">{{.UnreadCount}}</span>{{end}}
+                </a>
                 <a href="/templates" class="nav-link">Templates</a>
                 <a href="/settings" class="nav-link">Settings</a>
                 <hr class="nav-divider">

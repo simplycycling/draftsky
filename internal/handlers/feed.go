@@ -107,3 +107,41 @@ func (h *FeedHandler) HandleGetHashtagFeed(c *gin.Context) {
 
 	c.JSON(http.StatusOK, page)
 }
+
+// HandleGetNotifications returns a page of the authenticated user's notifications.
+// This is the JSON API surface for the future iOS app; unlike the web view it does
+// NOT call updateSeen (clients manage their own seen state).
+//
+// Query params:
+//   - cursor  (string, optional) — opaque pagination cursor from a previous response
+//   - limit   (int, optional)    — page size, default 50, max 100
+func (h *FeedHandler) HandleGetNotifications(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+	cursor := c.Query("cursor")
+	limit := parseLimit(c)
+
+	page, err := h.client.GetNotifications(c.Request.Context(), did, sessionID, cursor, limit)
+	if err != nil {
+		slog.Error("GetNotifications failed", "did", did, "err", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch notifications"})
+		return
+	}
+
+	c.JSON(http.StatusOK, page)
+}
+
+// HandleGetUnreadCount returns the authenticated user's unread notification count.
+func (h *FeedHandler) HandleGetUnreadCount(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+
+	count, err := h.client.GetUnreadCount(c.Request.Context(), did, sessionID)
+	if err != nil {
+		slog.Error("GetUnreadCount failed", "did", did, "err", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch unread count"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"count": count})
+}

@@ -1,0 +1,42 @@
+{{define "notification-row"}}
+{{/* A row is clickable only when it resolves to a post thread. Follows are inert
+     for now (no profiles yet) — rendered without an onclick or pointer cursor.
+     Unread rows carry an accent left-border, the same language as .post-card-focal. */}}
+<li class="post-card notification-row{{if not .IsRead}} notification-unread{{end}}"
+    {{if .Clickable}}data-target-uri="{{safeAtURI .TargetURI}}" onclick="navigateToThread(event, this.dataset.targetUri)" style="cursor:pointer"{{end}}>
+    <div class="notification-inner">
+        {{if .Author.Avatar}}
+        <img class="notification-avatar" src="{{derefStr .Author.Avatar}}" alt="" loading="lazy">
+        {{else}}
+        <div class="notification-avatar notification-avatar-initials">{{initials .Author.DisplayName .Author.Handle}}</div>
+        {{end}}
+        <div class="notification-body">
+            <div class="notification-line">
+                <span class="notification-actor">{{if .Author.DisplayName}}{{.Author.DisplayName}}{{else}}@{{.Author.Handle}}{{end}}</span>
+                <span class="notification-reason">{{.ReasonLine}}</span>
+                <span class="post-timestamp">{{relativeTime .IndexedAt}}</span>
+            </div>
+            {{if .Snippet}}
+            <p class="notification-snippet">{{.Snippet}}</p>
+            {{end}}
+        </div>
+    </div>
+</li>
+{{end}}
+
+{{/* notifications-more is the pagination fragment: the next page of rows plus a fresh
+     scroll sentinel. Mirrors the feed's feed-more fragment. */}}
+{{define "notifications-more"}}
+{{range .Notifications}}
+{{template "notification-row" .}}
+{{end}}
+{{if .SentinelURL}}
+<li id="feed-sentinel" class="feed-sentinel"
+    hx-get="{{.SentinelURL}}"
+    hx-trigger="revealed"
+    hx-target="#feed-sentinel"
+    hx-swap="outerHTML">
+    <div class="feed-loading">Loading more&hellip;</div>
+</li>
+{{end}}
+{{end}}

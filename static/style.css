@@ -1546,3 +1546,91 @@ button {
         line-height: 40px;
     }
 }
+
+/* ── Notifications ──────────────────────────────────────────────────────── */
+
+/* Unread-count pill on the left-rail Notifications link. Hidden entirely (not
+   rendered) when the count is zero — see layout.html. */
+.nav-link-notifications {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.nav-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+    color: var(--color-bg);
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+/* Unread rows are distinguished with an accent left-border — the same visual
+   language as .post-card-focal — plus a faint accent wash. */
+.notification-unread {
+    border-left: 3px solid var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 6%, var(--color-card));
+}
+
+.notification-inner {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.notification-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--color-card);
+}
+
+.notification-avatar-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+
+.notification-body {
+    min-width: 0;
+    flex: 1;
+}
+
+.notification-line {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.notification-actor {
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.notification-reason {
+    color: var(--color-muted);
+}
+
+.notification-snippet {
+    margin-top: 4px;
+    color: var(--color-muted);
+    font-size: 0.9rem;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}

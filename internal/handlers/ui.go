@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -58,6 +59,7 @@ type LayoutData struct {
 	CSRFToken   string // double-submit token surfaced in the layout <meta> tag
 	RecentTags  []string
 	SavedFeeds  []feed.SavedFeed // pinned feeds for the tab bar; nil = no tabs
+	UnreadCount int64            // unread notification count for the left-rail badge; 0 hides it
 	// Feed state
 	FeedPage      *feed.FeedPage
 	FeedType      string   // "following" | "hashtag" | "custom"
@@ -79,17 +81,26 @@ type ThreadPageData struct {
 	Error  string
 }
 
+// NotificationsPageData is the data envelope for the notifications page. It reuses
+// LayoutData.SentinelURL for the infinite-scroll sentinel.
+type NotificationsPageData struct {
+	LayoutData
+	Notifications []feed.Notification
+	Error         string
+}
+
 // UIHandler renders HTML pages.
 type UIHandler struct {
-	queries       *db.Queries
-	secret        []byte
-	feedClient    *feed.Client
-	tmplHome      *template.Template
-	tmplTemplates *template.Template
-	tmplThread    *template.Template
-	tmplLogin     *template.Template
-	tmpl404       *template.Template
-	tmpl500       *template.Template
+	queries           *db.Queries
+	secret            []byte
+	feedClient        *feed.Client
+	tmplHome          *template.Template
+	tmplTemplates     *template.Template
+	tmplThread        *template.Template
+	tmplNotifications *template.Template
+	tmplLogin         *template.Template
+	tmpl404           *template.Template
+	tmpl500           *template.Template
 }
 
 // NewUIHandler parses all page templates and returns a ready UIHandler.
@@ -213,6 +224,15 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmplNotifications, err := template.New("").Funcs(funcMap).ParseFiles(
+		"templates/layout.html",
+		"templates/partials/composer.html",
+		"templates/partials/notification_row.html",
+		"templates/notifications.html",
+	)
+	if err != nil {
+		return nil, err
+	}
 	tmplLogin, err := template.ParseFiles("templates/login.html")
 	if err != nil {
 		return nil, err
@@ -226,15 +246,16 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		return nil, err
 	}
 	return &UIHandler{
-		queries:       queries,
-		secret:        secret,
-		feedClient:    feedClient,
-		tmplHome:      tmplHome,
-		tmplTemplates: tmplTemplates,
-		tmplThread:    tmplThread,
-		tmplLogin:     tmplLogin,
-		tmpl404:       tmpl404,
-		tmpl500:       tmpl500,
+		queries:           queries,
+		secret:            secret,
+		feedClient:        feedClient,
+		tmplHome:          tmplHome,
+		tmplTemplates:     tmplTemplates,
+		tmplThread:        tmplThread,
+		tmplNotifications: tmplNotifications,
+		tmplLogin:         tmplLogin,
+		tmpl404:           tmpl404,
+		tmpl500:           tmpl500,
 	}, nil
 }
 
@@ -472,12 +493,37 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 		avatar = user.Avatar.String
 	}
 
-	// Fetch saved feeds for the tab bar — degrade to Following-only on failure.
-	savedFeeds, err := h.feedClient.GetSavedFeeds(c.Request.Context(), did, sessionID)
-	if err != nil {
-		slog.Warn("GetSavedFeeds failed, using following-only tab bar", "did", did, "err", err)
-		savedFeeds = []feed.SavedFeed{{DisplayName: "Following", IsTimeline: true}}
-	}
+	// Fetch the two upstream inputs for the chrome — the saved-feeds tab bar and the
+	// unread-notification badge — concurrently, so a page render pays one round-trip
+	// rather than two. Each degrades independently: saved feeds fall back to
+	// Following-only, the badge falls back to 0 (hidden). Neither breaks the page.
+	var (
+		wg          sync.WaitGroup
+		savedFeeds  []feed.SavedFeed
+		unreadCount int64
+	)
+	ctx := c.Request.Context()
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		feeds, err := h.feedClient.GetSavedFeeds(ctx, did, sessionID)
+		if err != nil {
+			slog.Warn("GetSavedFeeds failed, using following-only tab bar", "did", did, "err", err)
+			feeds = []feed.SavedFeed{{DisplayName: "Following", IsTimeline: true}}
+		}
+		savedFeeds = feeds
+	}()
+	go func() {
+		defer wg.Done()
+		count, err := h.feedClient.GetUnreadCount(ctx, did, sessionID)
+		if err != nil {
+			slog.Warn("GetUnreadCount failed, hiding notification badge", "did", did, "err", err)
+			count = 0
+		}
+		unreadCount = count
+	}()
+	wg.Wait()
 
 	return LayoutData{
 		User: PageUser{
@@ -486,10 +532,11 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 			Plan:   user.Plan,
 			Avatar: avatar,
 		},
-		Theme:      theme,
-		CSRFToken:  auth.CSRFToken(sessionID, h.secret),
-		RecentTags: recentTags,
-		SavedFeeds: savedFeeds,
+		Theme:       theme,
+		CSRFToken:   auth.CSRFToken(sessionID, h.secret),
+		RecentTags:  recentTags,
+		SavedFeeds:  savedFeeds,
+		UnreadCount: unreadCount,
 	}
 }
 
@@ -670,6 +717,84 @@ func (h *UIHandler) HandleThreadPage(c *gin.Context) {
 	if err := h.tmplThread.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		slog.Error("render thread page", "err", err)
 	}
+}
+
+// HandleNotificationsPage renders the notifications view.
+//
+// Without a cursor it renders the full three-column layout and — after fetching, so
+// the page still shows which items were unread — calls UpdateSeen to clear the badge.
+// With a cursor it serves just the "notifications-more" fragment for infinite scroll
+// (and does NOT re-run UpdateSeen).
+//
+// Known limitation: there is no polling or live update. The left-rail badge reflects
+// the count at page-render time and refreshes only on the next full page load.
+func (h *UIHandler) HandleNotificationsPage(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+	cursor := c.Query("cursor")
+
+	// Pagination request: return only the row fragment. No layout, no UpdateSeen.
+	if cursor != "" {
+		page := &feed.NotificationPage{Notifications: []feed.Notification{}}
+		if fetched, err := h.feedClient.GetNotifications(
+			c.Request.Context(), did, sessionID, cursor, uiFeedLimit,
+		); err != nil {
+			slog.Error("GetNotifications (partial)", "did", did, "err", err)
+		} else {
+			page = fetched
+		}
+
+		data := NotificationsPageData{
+			LayoutData:    LayoutData{SentinelURL: notificationsSentinelURL(page.NextCursor)},
+			Notifications: page.Notifications,
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		if err := h.tmplNotifications.ExecuteTemplate(c.Writer, "notifications-more", data); err != nil {
+			slog.Error("render notifications partial", "err", err)
+		}
+		return
+	}
+
+	user, err := h.queries.GetUserByDID(c.Request.Context(), did)
+	if err != nil {
+		slog.Error("GetUserByDID in notifications handler", "did", did, "err", err)
+		c.Redirect(http.StatusFound, "/login")
+		return
+	}
+
+	data := NotificationsPageData{
+		LayoutData: h.buildLayoutBase(c, did, sessionID, user),
+	}
+
+	page, err := h.feedClient.GetNotifications(c.Request.Context(), did, sessionID, "", uiFeedLimit)
+	if err != nil {
+		slog.Error("GetNotifications in notifications handler", "did", did, "err", err)
+		data.Error = "Unable to load notifications. Please try again."
+	} else {
+		data.Notifications = page.Notifications
+		data.SentinelURL = notificationsSentinelURL(page.NextCursor)
+	}
+
+	// Mark seen only after fetching, so the rows above still reflect which items were
+	// unread. Best-effort: a failure to clear the badge must not break the page.
+	if err := h.feedClient.UpdateSeen(c.Request.Context(), did, sessionID); err != nil {
+		slog.Warn("UpdateSeen failed", "did", did, "err", err)
+	} else {
+		// The badge on the page we're rendering is now stale — we just cleared it.
+		data.UnreadCount = 0
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplNotifications.ExecuteTemplate(c.Writer, "layout", data); err != nil {
+		slog.Error("render notifications page", "err", err)
+	}
+}
+
+func notificationsSentinelURL(nextCursor string) string {
+	if nextCursor == "" {
+		return ""
+	}
+	return "/notifications?cursor=" + url.QueryEscape(nextCursor)
 }
 
 func followingSentinelURL(nextCursor string) string {

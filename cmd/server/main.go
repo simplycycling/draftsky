@@ -166,6 +166,7 @@ func main() {
 	web := r.Group("/", middleware.RequireSession(secret), middleware.RequireCSRF(secret))
 	web.GET("", uiH.HandleHome)
 	web.GET("/thread", uiH.HandleThreadPage)
+	web.GET("/notifications", uiH.HandleNotificationsPage)
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
 	web.GET("/feed/custom", uiH.HandleCustomFeedPartial)
@@ -184,6 +185,8 @@ func main() {
 	feedH := handlers.NewFeedHandler(feedClient)
 	api.GET("/feed/following", feedH.HandleGetFollowingFeed)
 	api.GET("/feed/hashtags", feedH.HandleGetHashtagFeed)
+	api.GET("/notifications", feedH.HandleGetNotifications)
+	api.GET("/notifications/unread-count", feedH.HandleGetUnreadCount)
 
 	// Rate-limited operations — 60 req/min per DID for template CRUD and likes.
 	opsLimiter := middleware.NewOperationsRateLimiter()

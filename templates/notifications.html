@@ -1,0 +1,22 @@
+{{define "content"}}
+<div id="feed-root">
+    <div class="feed-controls">
+        <div class="feed-controls-inner">
+            <span class="feed-label">Notifications</span>
+        </div>
+    </div>
+    {{if .Error}}
+    <div class="feed-empty">
+        <p class="muted-text">{{.Error}}</p>
+    </div>
+    {{else if .Notifications}}
+    <ul id="post-list" class="post-list notifications-list">
+        {{template "notifications-more" .}}
+    </ul>
+    {{else}}
+    <div class="feed-empty">
+        <p class="muted-text">No notifications yet.</p>
+    </div>
+    {{end}}
+</div>
+{{end}}
