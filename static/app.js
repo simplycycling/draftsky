@@ -636,3 +636,71 @@ document.body.addEventListener('postSubmitted', function(evt) {
         switchToHashtagFeed([]);
     }
 });
+
+// --- Notification badge polling ---
+
+// Poll /api/notifications/unread-count so the left-rail badge updates while the app
+// is open, not only at page-render time. 60s is responsive enough for a badge without
+// leaning on the PDS. Background tabs are skipped (document.hidden) and a poll fires
+// immediately when the tab regains focus, so returning to it feels instant. A 401
+// (expired session) stops polling silently rather than spamming failed requests.
+let notifPollTimer = null;
+let notifPollStopped = false;
+
+// updateNotificationBadge reconciles the left-rail pill with count: create/show it
+// above zero, update the number, remove it at zero. Mirrors the server-rendered
+// markup (a .nav-badge span appended inside .nav-link-notifications).
+function updateNotificationBadge(count) {
+    const link = document.querySelector('.nav-link-notifications');
+    if (!link) return;
+    let badge = link.querySelector('.nav-badge');
+    if (count > 0) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'nav-badge';
+            link.appendChild(badge);
+        }
+        badge.textContent = String(count);
+    } else if (badge) {
+        badge.remove();
+    }
+}
+
+function stopNotificationPolling() {
+    notifPollStopped = true;
+    if (notifPollTimer !== null) {
+        clearInterval(notifPollTimer);
+        notifPollTimer = null;
+    }
+}
+
+async function pollUnreadCount() {
+    // Skip once stopped (401) and while the tab is hidden — no point polling a
+    // background tab. The interval keeps ticking but makes no request when hidden,
+    // so the network tab shows nothing until the tab is focused again.
+    if (notifPollStopped || document.hidden) return;
+    try {
+        // GET is CSRF-exempt server-side, so no token header is needed.
+        const res = await fetch('/api/notifications/unread-count');
+        if (res.status === 401) {
+            stopNotificationPolling();
+            return;
+        }
+        if (!res.ok) return; // transient error — next tick retries
+        const data = await res.json();
+        updateNotificationBadge(data.count || 0);
+    } catch (_) {
+        // Network hiccup — non-fatal; the next tick retries.
+    }
+}
+
+// Start polling only on authenticated pages (those with the notifications nav link).
+// No immediate poll on load: the server already rendered the correct count. Fires
+// an immediate poll when the tab becomes visible so a returning user sees fresh state.
+(function initNotificationPolling() {
+    if (!document.querySelector('.nav-link-notifications')) return;
+    notifPollTimer = setInterval(pollUnreadCount, 60000);
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) pollUnreadCount();
+    });
+})();

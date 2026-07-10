@@ -726,8 +726,10 @@ func (h *UIHandler) HandleThreadPage(c *gin.Context) {
 // With a cursor it serves just the "notifications-more" fragment for infinite scroll
 // (and does NOT re-run UpdateSeen).
 //
-// Known limitation: there is no polling or live update. The left-rail badge reflects
-// the count at page-render time and refreshes only on the next full page load.
+// Badge freshness: the server renders the count at page-render time; a client-side
+// poll (static/app.js, every 60s, paused on hidden tabs) then keeps the left-rail
+// badge current while the app stays open. There is still no server push — a brand-new
+// notification surfaces within one poll interval, not instantly.
 func (h *UIHandler) HandleNotificationsPage(c *gin.Context) {
 	did := c.GetString(middleware.ContextKeyDID)
 	sessionID := c.GetString(middleware.ContextKeySessionID)
