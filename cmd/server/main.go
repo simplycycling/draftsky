@@ -171,6 +171,7 @@ func main() {
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
 	web.GET("/feed/custom", uiH.HandleCustomFeedPartial)
 	web.GET("/templates", uiH.HandleTemplatesPage)
+	web.GET("/settings", uiH.HandleSettingsPage)
 	web.POST("/templates", uiH.HandleWebCreateTemplate)
 	web.PUT("/templates/:id", uiH.HandleWebUpdateTemplate)
 
@@ -205,6 +206,9 @@ func main() {
 	likeH := handlers.NewLikeHandler(oauthApp)
 	rated.POST("/like", likeH.HandleCreateLike)
 	rated.DELETE("/like", likeH.HandleDeleteLike)
+
+	settingsH := handlers.NewSettingsHandler(queries)
+	rated.PUT("/settings/theme", settingsH.HandleUpdateTheme)
 
 	repostH := handlers.NewRepostHandler(oauthApp)
 	rated.POST("/repost", repostH.HandleCreateRepost)

@@ -623,6 +623,45 @@ function switchToHashtagFeed(tags) {
     htmx.ajax('GET', currentFeedURL, { target: '#feed-root', swap: 'innerHTML' });
 }
 
+// --- Settings: theme selector ---
+
+const THEME_KEYS = ['ocean', 'slate', 'amber', 'graphite'];
+
+// applyTheme swaps the live theme without a reload. The CSS keys themes off a
+// body class (:root holds the ocean defaults, body.slate/.amber/.graphite
+// override), so 'ocean' means removing every theme class and adding none.
+function applyTheme(themeKey) {
+    document.body.classList.remove(...THEME_KEYS);
+    if (themeKey !== 'ocean') document.body.classList.add(themeKey);
+
+    // Move the selected outline to the chosen card.
+    document.querySelectorAll('.theme-card').forEach(card => {
+        card.classList.toggle('selected', card.dataset.themeKey === themeKey);
+    });
+}
+
+// Repaint the theme after the HTMX PUT to /api/settings/theme succeeds. This is a
+// delegated htmx:afterRequest listener rather than an hx-on attribute on purpose:
+// hx-on evaluates its body with new Function(), which the app's CSP (no
+// 'unsafe-eval') blocks, so the callback would silently never fire. The request is
+// still driven by the card's hx-put/hx-vals in the HTML; only the DOM repaint lives
+// here, mirroring the other htmx:* listeners in this file. On any error (e.g. a 403
+// the UI didn't expect) the current theme is left untouched.
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+    const card = evt.target.closest ? evt.target.closest('.theme-card') : null;
+    if (!card) return;
+    if (evt.detail.successful) {
+        applyTheme(card.dataset.themeKey);
+    }
+});
+
+// showThemeLocked reveals the one-line paid-feature note when a free user clicks
+// a locked theme card. No modal, no upsell — just the sentence.
+function showThemeLocked() {
+    const msg = document.getElementById('theme-locked-msg');
+    if (msg) msg.style.display = '';
+}
+
 document.body.addEventListener('postSubmitted', function(evt) {
     const { hashtags, isReply } = evt.detail;
     if (hashtags && hashtags.length > 0) {

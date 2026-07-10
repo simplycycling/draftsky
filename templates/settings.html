@@ -1,0 +1,101 @@
+{{define "content"}}
+{{$paid := eq .User.Plan "paid"}}
+{{$theme := .Theme}}
+<div class="settings-page">
+
+    <div class="settings-header">
+        <h1 class="page-title">Settings</h1>
+    </div>
+
+    <!-- Account -->
+    <section class="settings-section">
+        <h2 class="section-heading">Account</h2>
+        <div class="account-card">
+            {{if .User.Avatar}}
+            <img class="account-avatar" src="{{.User.Avatar}}" alt="Avatar">
+            {{else}}
+            <div class="account-avatar account-avatar-placeholder"></div>
+            {{end}}
+            <div class="account-meta">
+                <div class="account-handle">@{{.User.Handle}}</div>
+                <div class="account-did">{{.User.DID}}</div>
+                <div class="account-plan">
+                    Plan: <span class="plan-badge{{if $paid}} plan-badge-paid{{end}}">{{if $paid}}Paid{{else}}Free{{end}}</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Theme -->
+    <section class="settings-section">
+        <h2 class="section-heading">Theme</h2>
+        {{if not $paid}}
+        <p class="section-subtitle">Deep Ocean is included on the free plan. Other themes are a paid feature.</p>
+        {{end}}
+
+        <div class="theme-grid">
+
+            <!-- Deep Ocean (free) -->
+            <button type="button"
+                    class="theme-card{{if eq $theme "ocean"}} selected{{end}}"
+                    data-theme-key="ocean"
+                    {{if $paid}}hx-put="/api/settings/theme" hx-vals='{"theme": "ocean"}' hx-swap="none"{{end}}>
+                <span class="theme-swatch">
+                    <span class="swatch" style="background:#070d1a"></span>
+                    <span class="swatch" style="background:#0d1829"></span>
+                    <span class="swatch" style="background:#34d399"></span>
+                </span>
+                <span class="theme-name">Deep Ocean</span>
+            </button>
+
+            <!-- Midnight Slate (paid) -->
+            <button type="button"
+                    class="theme-card{{if eq $theme "slate"}} selected{{end}}{{if not $paid}} locked{{end}}"
+                    data-theme-key="slate"
+                    {{if $paid}}hx-put="/api/settings/theme" hx-vals='{"theme": "slate"}' hx-swap="none"{{else}}onclick="showThemeLocked()"{{end}}>
+                <span class="theme-swatch">
+                    <span class="swatch" style="background:#0f1117"></span>
+                    <span class="swatch" style="background:#181c27"></span>
+                    <span class="swatch" style="background:#7c9ef8"></span>
+                </span>
+                <span class="theme-name">Midnight Slate</span>
+                {{if not $paid}}<span class="theme-pill">Paid</span>{{end}}
+            </button>
+
+            <!-- Charcoal & Amber (paid) -->
+            <button type="button"
+                    class="theme-card{{if eq $theme "amber"}} selected{{end}}{{if not $paid}} locked{{end}}"
+                    data-theme-key="amber"
+                    {{if $paid}}hx-put="/api/settings/theme" hx-vals='{"theme": "amber"}' hx-swap="none"{{else}}onclick="showThemeLocked()"{{end}}>
+                <span class="theme-swatch">
+                    <span class="swatch" style="background:#111111"></span>
+                    <span class="swatch" style="background:#1a1a1a"></span>
+                    <span class="swatch" style="background:#f59e0b"></span>
+                </span>
+                <span class="theme-name">Charcoal &amp; Amber</span>
+                {{if not $paid}}<span class="theme-pill">Paid</span>{{end}}
+            </button>
+
+            <!-- Graphite & Sky (paid) -->
+            <button type="button"
+                    class="theme-card{{if eq $theme "graphite"}} selected{{end}}{{if not $paid}} locked{{end}}"
+                    data-theme-key="graphite"
+                    {{if $paid}}hx-put="/api/settings/theme" hx-vals='{"theme": "graphite"}' hx-swap="none"{{else}}onclick="showThemeLocked()"{{end}}>
+                <span class="theme-swatch">
+                    <span class="swatch" style="background:#131416"></span>
+                    <span class="swatch" style="background:#1c1f23"></span>
+                    <span class="swatch" style="background:#38bdf8"></span>
+                </span>
+                <span class="theme-name">Graphite &amp; Sky</span>
+                {{if not $paid}}<span class="theme-pill">Paid</span>{{end}}
+            </button>
+
+        </div>
+
+        <p id="theme-locked-msg" class="theme-locked-msg" style="display:none">
+            Themes are a paid feature.
+        </p>
+    </section>
+
+</div>
+{{end}}

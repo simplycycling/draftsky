@@ -106,6 +106,34 @@ func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarPara
 	return err
 }
 
+const updateUserTheme = `-- name: UpdateUserTheme :one
+UPDATE users SET theme = $2 WHERE did = $1
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar
+`
+
+type UpdateUserThemeParams struct {
+	Did   string
+	Theme string
+}
+
+func (q *Queries) UpdateUserTheme(ctx context.Context, arg UpdateUserThemeParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUserTheme, arg.Did, arg.Theme)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Did,
+		&i.Handle,
+		&i.AccessToken,
+		&i.RefreshToken,
+		&i.TokenExpiry,
+		&i.CreatedAt,
+		&i.Plan,
+		&i.Theme,
+		&i.Avatar,
+	)
+	return i, err
+}
+
 const updateUserTokens = `-- name: UpdateUserTokens :one
 UPDATE users
 SET access_token  = $2,

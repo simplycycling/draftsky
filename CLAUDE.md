@@ -421,6 +421,19 @@ in Docker (`docker start draftsky-dev-db`).
    trusted proxies to Railway's CIDR
 
 ### Post-GA / longer term
+- **Hashtag activity counter** (small) — when the post-submit hashtag feed appears,
+  show per-tag stats from the already-fetched merged feed: post count and rough
+  recency per tag (e.g. "#NJDevils: 47 posts in the last hour"). Answers "which of my
+  tags have a live audience right now?" — a counting pass over data already in hand
+  plus a small UI strip above the feed.
+- **Hashtag performance analytics** (paid-tier flagship) — correlate the user's own
+  posts' engagement with the hashtags used over time: "posts with #motosky average
+  4.2 likes; #bmwgs averages 0.8." Requires periodic re-fetching of the user's posts'
+  like/reply/repost counts (they change for days), engagement snapshots stored against
+  the hashtags already in `post_history`, and honest handling of confounders (one viral
+  post inflates its tags). This consciously reverses the "no analytics" Out of Scope
+  entry for OWN-posts-only analytics — no tracking of other users. This is the anchor
+  of the paid tier's value story for channel-runners and self-promoters.
 - **Hashtag context menu** — Bluesky-style popover on hashtag click/long-press:
   "See #tag posts" (existing hashtag feed), "See #tag posts by user" (needs author
   feeds), "Mute #tag" (needs a mutes table + feed filtering). Deferred until
@@ -523,8 +536,9 @@ DraftSky uses a freemium model on web and an ad-supported + one-time purchase mo
 
 **Web:**
 - Free tier: up to 5 templates, Following feed, posting, replies, Ocean theme only
-- Paid tier: unlimited templates, all themes, tabbed hashtag feed (future)
-- Enforced via the `plan` column (enforcement pending — priority item 4)
+- Paid tier: unlimited templates, all themes, tabbed hashtag feed (future), hashtag
+  performance analytics (future — the paid flagship; see roadmap)
+- Enforced via the `plan` column (enforcement pending — priority item 5)
 
 **iOS (future):**
 - Ads by default (AdMob or equivalent); non-consumable IAP via StoreKit 2 removes them
@@ -539,7 +553,8 @@ DraftSky uses a freemium model on web and an ad-supported + one-time purchase mo
 
 - Multi-platform support (Mastodon, Threads etc.) — Bluesky only
 - Scheduling posts
-- Analytics or engagement tracking
+- Analytics or engagement tracking of OTHER users (own-posts hashtag performance
+  analytics is planned — see roadmap; this line covers tracking anyone else)
 - Team/shared template libraries
 - Photo posting (requires blob upload — on the long-term roadmap)
 
@@ -554,5 +569,4 @@ github.com/bluesky-social/indigo
 github.com/golang-migrate/migrate/v4
 golang.org/x/time/rate
 sqlc (CLI tool — see https://sqlc.dev)
-hls.js (self-hosted at /static/vendor/hls.min.js — do not reintroduce a CDN)
 ```

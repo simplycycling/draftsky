@@ -98,6 +98,7 @@ type UIHandler struct {
 	tmplTemplates     *template.Template
 	tmplThread        *template.Template
 	tmplNotifications *template.Template
+	tmplSettings      *template.Template
 	tmplLogin         *template.Template
 	tmpl404           *template.Template
 	tmpl500           *template.Template
@@ -233,6 +234,14 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmplSettings, err := template.New("").Funcs(funcMap).ParseFiles(
+		"templates/layout.html",
+		"templates/partials/composer.html",
+		"templates/settings.html",
+	)
+	if err != nil {
+		return nil, err
+	}
 	tmplLogin, err := template.ParseFiles("templates/login.html")
 	if err != nil {
 		return nil, err
@@ -253,6 +262,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		tmplTemplates:     tmplTemplates,
 		tmplThread:        tmplThread,
 		tmplNotifications: tmplNotifications,
+		tmplSettings:      tmplSettings,
 		tmplLogin:         tmplLogin,
 		tmpl404:           tmpl404,
 		tmpl500:           tmpl500,
@@ -572,6 +582,26 @@ func (h *UIHandler) HandleTemplatesPage(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplTemplates.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		slog.Error("render templates page", "err", err)
+	}
+}
+
+// HandleSettingsPage renders the settings page (Account + Theme selector).
+// Theme and plan are carried in the LayoutData envelope, so the template drives
+// the selected/locked card states directly from .Theme and .User.Plan.
+func (h *UIHandler) HandleSettingsPage(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+
+	user, ok := h.resolveUserForTemplates(c, did)
+	if !ok {
+		return
+	}
+
+	data := h.buildLayoutBase(c, did, sessionID, user)
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplSettings.ExecuteTemplate(c.Writer, "layout", data); err != nil {
+		slog.Error("render settings page", "err", err)
 	}
 }
 

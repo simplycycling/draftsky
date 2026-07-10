@@ -22,6 +22,10 @@ RETURNING *;
 -- name: UpdateUserAvatar :exec
 UPDATE users SET avatar = $2 WHERE did = $1;
 
+-- name: UpdateUserTheme :one
+UPDATE users SET theme = $2 WHERE did = $1
+RETURNING *;
+
 -- name: CreatePostHistory :one
 INSERT INTO post_history (user_id, uri, hashtags)
 VALUES ($1, $2, $3)
