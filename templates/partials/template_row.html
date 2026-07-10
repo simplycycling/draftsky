@@ -23,7 +23,7 @@
         <form hx-put="/templates/{{.ID}}"
               hx-target="closest li"
               hx-swap="outerHTML"
-              hx-on::after-request="onEditResponse(event, {{.ID}})">
+              data-edit-template-id="{{.ID}}">
             <div class="tr-edit-fields">
                 <input class="tr-input" type="text" name="name" value="{{.Name}}"
                        placeholder="Template name" required autocomplete="off"

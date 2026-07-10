@@ -640,17 +640,35 @@ function applyTheme(themeKey) {
     });
 }
 
-// Repaint the theme after the HTMX PUT to /api/settings/theme succeeds. This is a
-// delegated htmx:afterRequest listener rather than an hx-on attribute on purpose:
-// hx-on evaluates its body with new Function(), which the app's CSP (no
-// 'unsafe-eval') blocks, so the callback would silently never fire. The request is
-// still driven by the card's hx-put/hx-vals in the HTML; only the DOM repaint lives
-// here, mirroring the other htmx:* listeners in this file. On any error (e.g. a 403
-// the UI didn't expect) the current theme is left untouched.
+// Single delegated htmx:afterRequest dispatcher for every post-request DOM hook.
+// These MUST NOT be hx-on::after-request attributes: HTMX evaluates hx-on bodies
+// with new Function(), which the app's CSP (no 'unsafe-eval') blocks. The failure
+// is silent — a CSP EvalError lands in the console but HTMX carries on, the swap
+// still happens, and only the handler is skipped (see Gotcha 17 in CLAUDE.md). So
+// every hook lives here, keyed off the requesting element (evt.detail.elt). The
+// request itself is still driven by the element's hx-* attributes in the HTML.
 document.body.addEventListener('htmx:afterRequest', function(evt) {
-    const card = evt.target.closest ? evt.target.closest('.theme-card') : null;
-    if (!card) return;
-    if (evt.detail.successful) {
+    const elt = evt.detail.elt;
+    if (!elt) return;
+
+    // Template Add form — clears inputs on success, renders the inline 409/400
+    // error on failure.
+    if (elt.id === 'add-template-form') {
+        onAddTemplateResponse(evt);
+        return;
+    }
+
+    // Template inline-edit form — renders the inline error on failure (a success
+    // swaps the whole row via hx-swap="outerHTML", so nothing to do there).
+    if (elt.matches && elt.matches('[data-edit-template-id]')) {
+        onEditResponse(evt, elt.dataset.editTemplateId);
+        return;
+    }
+
+    // Settings theme card — repaints the theme instantly on success; on any error
+    // (e.g. a 403 the UI didn't expect) the current theme is left untouched.
+    const card = elt.closest ? elt.closest('.theme-card') : null;
+    if (card && evt.detail.successful) {
         applyTheme(card.dataset.themeKey);
     }
 });

@@ -13,8 +13,7 @@
               class="add-template-form"
               hx-post="/templates"
               hx-target="#template-list"
-              hx-swap="beforeend"
-              hx-on::after-request="onAddTemplateResponse(event)">
+              hx-swap="beforeend">
             <input class="tr-input" type="text" name="name"
                    placeholder="Name, e.g. Devils Game"
                    required autocomplete="off"

@@ -367,6 +367,16 @@ draftsky/
 16. **Code-walks don't catch lifecycle-ordering errors.** Anything involving an async
     external library (hls.js, HTMX internals) needs one real browser execution before
     it counts as verified. Status-code curls verify handlers, not DOM behaviour.
+17. **`hx-on::*` is dead under our CSP.** HTMX evaluates `hx-on` attribute bodies with
+    `new Function()`, which our CSP (`script-src 'self' 'unsafe-inline'` — no
+    `'unsafe-eval'`) blocks. The failure is *silent*: a CSP `EvalError` prints to the
+    console but HTMX carries on — the request fires, the swap still happens, only the
+    handler body is skipped. So a broken `hx-on` looks like it works until you notice
+    the after-response side effect (inline error, input reset, repaint) never ran.
+    Never use `hx-on`; wire a single delegated `htmx:afterRequest` (or other `htmx:*`)
+    listener in app.js, keyed off `evt.detail.elt` (id or a `data-` attribute), and
+    dispatch to named functions. The request stays in the element's `hx-*` attributes.
+    Same trap for `hx-vals="js:…"` (also eval-based) — plain-JSON `hx-vals` is fine.
 
 ---
 
