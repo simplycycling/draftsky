@@ -481,12 +481,16 @@ button {
     text-decoration: underline;
 }
 
-/* Mentions are accent-coloured but not yet interactive — profiles (future) will
-   make them clickable. Default cursor signals there is no click target today. */
+/* Mentions are accent-coloured and clickable — they navigate to /profile/<handle>,
+   matching .post-hashtag's affordance (pointer cursor + hover underline). */
 .post-mention {
     color: var(--color-accent);
     font-weight: 500;
-    cursor: default;
+    cursor: pointer;
+}
+
+.post-mention:hover {
+    text-decoration: underline;
 }
 
 .post-meta {

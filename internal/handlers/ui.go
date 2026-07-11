@@ -138,11 +138,13 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		// Hashtag spans get an onclick that stops propagation (so the card-level
 		// navigateToThread never fires) and switches the feed via
 		// switchToHashtagFeed; JSEscapeString guards the tag name inside the JS
-		// string literal. Mention spans are display-only for now — non-clickable
-		// (cursor: default) and deliberately WITHOUT stopPropagation so a click
-		// still falls through to the card's thread navigation. Profiles (future)
-		// will make mentions clickable; at that point they can consume the post's
-		// real mention facets rather than this display-text regex pass.
+		// string literal. Mention spans work the same way: onclick stops
+		// propagation and calls navigateToProfile(event, '<handle>'), sending the
+		// user to /profile/<handle>. The handle (token minus the leading '@') goes
+		// through JSEscapeString for the JS string literal — it is already
+		// regex-validated domain-form text from uiMentionRe, but is escaped anyway
+		// as defence in depth (never trust display text). A handle that no longer
+		// resolves simply 404s at /profile, which is acceptable.
 		"highlightFacets": func(text string) template.HTML {
 			type span struct {
 				start, end int
@@ -168,7 +170,10 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 				buf.WriteString(template.HTMLEscapeString(text[last:s.start]))
 				token := text[s.start:s.end]
 				if s.mention {
-					buf.WriteString(`<span class="post-mention">`)
+					handle := template.JSEscapeString(token[1:]) // strip '@', JS-escape
+					buf.WriteString(`<span class="post-mention" onclick="event.stopPropagation();navigateToProfile(event,'`)
+					buf.WriteString(handle)
+					buf.WriteString(`')">`)
 					buf.WriteString(template.HTMLEscapeString(token))
 					buf.WriteString(`</span>`)
 				} else {
