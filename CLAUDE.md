@@ -427,11 +427,34 @@ in Docker (`docker start draftsky-dev-db`).
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
 
-### Current priority order (final GA item)
+### Current priority order (pre-GA ladder — GA after item 6)
 1. **Free tier enforcement** — 5-template limit on POST /api/templates (server-side,
    403/409 with a clear message when a free user has 5), `RequirePaidPlan` middleware
    for future paid-only endpoints; scope trusted proxies to Railway's CIDR (replace
-   the 0.0.0.0/0 placeholder). After this: GA.
+   the 0.0.0.0/0 placeholder)
+2. **Quote posts** — the repost button becomes a small Repost/Quote menu; Quote opens
+   the composer in quote mode (like reply mode, carrying `{uri, cid}`), which attaches
+   an `app.bsky.embed.record` to the post record. Templates work in quotes. Quote mode
+   and reply mode are mutually exclusive in v1.
+3. **Profiles** — `/profile/<handle>` view: getProfile header (avatar, banner, display
+   name, bio, follower/following/post counts) + getAuthorFeed with cursor pagination
+   through the existing feed rendering. Own profile gets text-only editing (display
+   name + bio via putRecord on the profile record). Avatar/banner UPLOAD is deferred
+   to photo posting post-GA (needs uploadBlob). Clicking avatars/handles anywhere in
+   feeds navigates to the profile.
+4. **Clickable mentions** — the accent mention spans in feeds get click-through to
+   `/profile/<handle>` (stopPropagation so card click-through survives, same pattern
+   as hashtags)
+5. **Mention typeahead** — composer: typing `@` + chars triggers a debounced
+   searchActorsTypeahead dropdown; keyboard navigation (up/down/enter/escape),
+   insert-on-select. Works in both new-post and reply/quote modes.
+6. **Hashtag context menu** — Bluesky-style popover on hashtag click: "See #tag posts"
+   (existing hashtag feed) and "See #tag posts by user" (author feed filtered — check
+   whether searchPosts supports author+tag; if not, defer this half too and note it).
+   "Mute #tag" is explicitly DEFERRED post-GA (needs a mutes table + filtering on
+   every feed path).
+
+After item 6: **GA**.
 
 ### Post-GA / longer term
 - **Hashtag activity counter** (small) — when the post-submit hashtag feed appears,
@@ -447,16 +470,10 @@ in Docker (`docker start draftsky-dev-db`).
   post inflates its tags). This consciously reverses the "no analytics" Out of Scope
   entry for OWN-posts-only analytics — no tracking of other users. This is the anchor
   of the paid tier's value story for channel-runners and self-promoters.
-- **Hashtag context menu** — Bluesky-style popover on hashtag click/long-press:
-  "See #tag posts" (existing hashtag feed), "See #tag posts by user" (needs author
-  feeds), "Mute #tag" (needs a mutes table + feed filtering). Deferred until
-  profiles/author feeds exist; plain click switches to the hashtag feed until then.
-- Own profile view/edit; other user profiles (getProfile, getAuthorFeed) — also
-  unlocks: clickable mentions in feeds, mention typeahead in the composer
-  (searchActorsTypeahead: debounced input, dropdown, keyboard nav, insert-on-select),
-  and the hashtag context menu
 - Browser Notifications API on top of the unread poll (opt-in from settings; OS-level
   notification when count rises while tab unfocused)
+- Avatar/banner editing on profiles (rides with photo posting — uploadBlob)
+- "Mute #tag" in the hashtag context menu (mutes table + filtering on every feed path)
 - Search (searchPosts, searchActors)
 - Bookmarks (local until AT Protocol supports natively)
 - Photo posting (uploadBlob)
