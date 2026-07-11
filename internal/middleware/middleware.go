@@ -1,14 +1,19 @@
 package middleware
 
 import (
+	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"golang.org/x/time/rate"
 
 	"github.com/rsherman/draftsky/internal/auth"
+	db "github.com/rsherman/draftsky/internal/db/sqlc"
 )
 
 // SecurityHeaders adds standard security response headers to every request.
@@ -132,6 +137,44 @@ func RequireCSRF(secret []byte) gin.HandlerFunc {
 		sessionID := c.GetString(ContextKeySessionID)
 		if token == "" || !auth.VerifyCSRFToken(sessionID, token, secret) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid or missing CSRF token"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// PlanLookup is the narrow query surface RequirePaidPlan needs to resolve the
+// authenticated user's plan. *db.Queries satisfies it.
+type PlanLookup interface {
+	GetUserByDID(ctx context.Context, did string) (db.User, error)
+}
+
+// RequirePaidPlan gates a route to paid-plan users. It must run AFTER RequireAuth or
+// RequireSession, which populate ContextKeyDID; it loads the user by that DID and 403s
+// any non-paid user with a JSON error. Not mounted on any route yet — it exists for
+// future paid-only endpoints (e.g. hashtag analytics). The theme endpoint keeps its own
+// inline plan check (it returns a themed 403 message), so it does not use this.
+func RequirePaidPlan(lookup PlanLookup) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		did := c.GetString(ContextKeyDID)
+		if did == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+			return
+		}
+
+		user, err := lookup.GetUserByDID(c.Request.Context(), did)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+				return
+			}
+			slog.Error("RequirePaidPlan GetUserByDID failed", "did", did, "err", err)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+
+		if user.Plan != "paid" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "this feature requires a paid plan"})
 			return
 		}
 		c.Next()

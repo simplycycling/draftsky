@@ -1185,6 +1185,18 @@ button {
     opacity: 0.88;
 }
 
+.btn-add-template:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Free-tier cap note under the Add form — muted and informative, not an error. */
+.template-limit-note {
+    margin-top: 8px;
+    font-size: 0.82rem;
+    color: var(--color-muted);
+}
+
 .form-error {
     margin-top: 8px;
     padding: 7px 10px;

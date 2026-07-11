@@ -79,9 +79,13 @@ type LayoutData struct {
 }
 
 // TemplatesPageData is the data envelope for the templates management page.
+// CanAddTemplate is false when a free user is at the template cap; the Add form
+// then renders disabled with LimitMessage inline. Plan is carried via LayoutData.User.
 type TemplatesPageData struct {
 	LayoutData
-	Templates []templateResponse
+	Templates      []templateResponse
+	CanAddTemplate bool
+	LimitMessage   string
 }
 
 // ThreadPageData is the data envelope for the thread view page.
@@ -611,9 +615,16 @@ func (h *UIHandler) HandleTemplatesPage(c *gin.Context) {
 		templates[i] = toResponse(t)
 	}
 
+	// Mirror the server-side cap in the UI: a free user at the limit gets a disabled
+	// Add button with an inline message. Paid users are never capped. This is cosmetic
+	// — the create handlers re-check authoritatively regardless of what the UI shows.
+	canAdd := user.Plan == "paid" || len(templates) < freeTemplateLimit
+
 	data := TemplatesPageData{
-		LayoutData: h.buildLayoutBase(c, did, sessionID, user),
-		Templates:  templates,
+		LayoutData:     h.buildLayoutBase(c, did, sessionID, user),
+		Templates:      templates,
+		CanAddTemplate: canAdd,
+		LimitMessage:   freeTemplateLimitMessage,
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
@@ -657,6 +668,20 @@ func (h *UIHandler) HandleWebCreateTemplate(c *gin.Context) {
 
 	user, ok := h.resolveUserForTemplates(c, did)
 	if !ok {
+		return
+	}
+
+	// Free-tier cap. Same authoritative check as the JSON API: a free user who forces
+	// this POST past the disabled Add button is blocked with 403. The JSON error body
+	// renders through the inline #add-template-error path (onAddTemplateResponse).
+	atCap, err := freeUserAtTemplateCap(c.Request.Context(), h.queries, user)
+	if err != nil {
+		slog.Error("CountTemplatesByUser (web) failed", "user_id", user.ID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if atCap {
+		c.JSON(http.StatusForbidden, gin.H{"error": freeTemplateLimitMessage})
 		return
 	}
 

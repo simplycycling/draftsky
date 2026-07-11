@@ -28,9 +28,25 @@ type templateResponse struct {
 	CreatedAt string `json:"created_at,omitempty"`
 }
 
+// templateStore is the query surface the template endpoints use. Declaring it as an
+// interface (mirroring settingsStore) lets the create/update/delete paths be unit-tested
+// with a fake, without a live PostgreSQL. *db.Queries satisfies it. Reorder still needs
+// the concrete *pgxpool.Pool for its transaction, so that dependency stays separate.
+type templateStore interface {
+	GetUserByDID(ctx context.Context, did string) (db.User, error)
+	ListTemplatesByUser(ctx context.Context, userID pgtype.Int4) ([]db.Template, error)
+	CountTemplatesByUser(ctx context.Context, userID pgtype.Int4) (int64, error)
+	CreateTemplate(ctx context.Context, arg db.CreateTemplateParams) (db.Template, error)
+	GetTemplate(ctx context.Context, arg db.GetTemplateParams) (db.Template, error)
+	UpdateTemplate(ctx context.Context, arg db.UpdateTemplateParams) (db.Template, error)
+	UpdateTemplatePosition(ctx context.Context, arg db.UpdateTemplatePositionParams) (db.Template, error)
+	DeleteTemplate(ctx context.Context, arg db.DeleteTemplateParams) error
+	WithTx(tx pgx.Tx) *db.Queries
+}
+
 // TemplateHandler holds dependencies for the template API endpoints.
 type TemplateHandler struct {
-	queries *db.Queries
+	queries templateStore
 	pool    *pgxpool.Pool
 }
 
@@ -85,6 +101,37 @@ func parseTemplateID(c *gin.Context) (int32, bool) {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// freeTemplateLimit is the maximum number of templates a free-plan user may hold.
+// Only creation of the (limit+1)th template is blocked — edits, deletes, and reorders
+// are never limited, so a free user at the cap can still fully manage what they have.
+const freeTemplateLimit = 5
+
+// freeTemplateLimitMessage is surfaced to a free user who hits the cap. Non-hostile,
+// and points at the upgrade path. Shared by both create handlers and the templates page.
+const freeTemplateLimitMessage = "Free accounts can have up to 5 templates. Upgrade for unlimited templates."
+
+// templateCounter is the narrow query surface the free-tier cap check needs.
+// *db.Queries satisfies it.
+type templateCounter interface {
+	CountTemplatesByUser(ctx context.Context, userID pgtype.Int4) (int64, error)
+}
+
+// freeUserAtTemplateCap reports whether a free-plan user already holds the maximum
+// number of templates and must be blocked from creating another. Paid users are never
+// capped (returns false without a query). Any count error is returned so the caller
+// fails the request rather than silently allowing or denying. The check is authoritative
+// and runs server-side regardless of what the UI allowed, mirroring the theme paid-gate.
+func freeUserAtTemplateCap(ctx context.Context, q templateCounter, user db.User) (bool, error) {
+	if user.Plan == "paid" {
+		return false, nil
+	}
+	n, err := q.CountTemplatesByUser(ctx, pgtype.Int4{Int32: user.ID, Valid: true})
+	if err != nil {
+		return false, err
+	}
+	return n >= freeTemplateLimit, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +202,20 @@ func (h *TemplateHandler) HandleCreateTemplate(c *gin.Context) {
 
 	user, ok := h.resolveUser(c, did)
 	if !ok {
+		return
+	}
+
+	// Free-tier cap. A permission boundary, not a conflict — 403, not 409. Enforced
+	// here regardless of UI state; a free user who forces the request past the disabled
+	// Add button still gets blocked.
+	atCap, err := freeUserAtTemplateCap(c.Request.Context(), h.queries, user)
+	if err != nil {
+		slog.Error("CountTemplatesByUser failed", "user_id", user.ID, "err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	if atCap {
+		c.JSON(http.StatusForbidden, gin.H{"error": freeTemplateLimitMessage})
 		return
 	}
 

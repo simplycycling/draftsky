@@ -108,11 +108,29 @@ func main() {
 	r.Use(gin.Recovery())
 	r.Use(gin.Logger())
 	r.Use(middleware.SecurityHeaders())
-	// Railway terminates TLS at the edge and forwards requests via an internal proxy.
-	// TrustedProxies(nil) disables network-level proxy IP trust; ForwardedByClientIP
-	// reads the real client IP from the X-Forwarded-For header set by Railway's proxy.
-	r.SetTrustedProxies(nil)
+	// Trusted proxies (reviewed 2026-07-11). Railway terminates TLS at its edge and
+	// forwards requests through an internal proxy that connects from private address
+	// space within Railway's network; Railway publishes no stable public egress CIDR
+	// for the edge to pin. So we trust only the RFC 1918 private ranges plus the
+	// RFC 6598 CGNAT range (100.64.0.0/10, which Railway's internal networking uses):
+	// X-Forwarded-For is honoured when the immediate peer is one of those internal
+	// proxies, but a direct external client cannot forge an arbitrary client IP by
+	// setting the header itself — Gin ignores XFF from an untrusted peer.
+	//
+	// This affects LOG ACCURACY ONLY today: rate limiting is keyed per-DID (see the
+	// OperationsRateLimiter and post limiter), not per-IP, so a spoofed client IP could
+	// not evade a limit even if the header were trusted. c.ClientIP() is used for
+	// request logging.
 	r.ForwardedByClientIP = true
+	if err := r.SetTrustedProxies([]string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"100.64.0.0/10",
+	}); err != nil {
+		slog.Error("failed to set trusted proxies", "err", err)
+		os.Exit(1)
+	}
 
 	secret := []byte(sessionSecret)
 	secure := appEnv == "production"

@@ -17,15 +17,21 @@
             <input class="tr-input" type="text" name="name"
                    placeholder="Name, e.g. Devils Game"
                    required autocomplete="off"
+                   {{if not .CanAddTemplate}}disabled{{end}}
                    oninput="updateTrCounter(this, 100, 'add-name-counter', 'add-btn')">
             <span class="char-counter" id="add-name-counter">100</span>
             <input class="tr-input tr-input-suffix" type="text" name="suffix"
                    placeholder="Suffix, e.g. #NJDevils #NHL"
                    required autocomplete="off"
+                   {{if not .CanAddTemplate}}disabled{{end}}
                    oninput="updateTrCounter(this, 250, 'add-suffix-counter', 'add-btn')">
             <span class="char-counter" id="add-suffix-counter">250</span>
-            <button type="submit" id="add-btn" class="btn-add-template">Add</button>
+            <button type="submit" id="add-btn" class="btn-add-template"
+                    {{if not .CanAddTemplate}}disabled{{end}}>Add</button>
         </form>
+        {{if not .CanAddTemplate}}
+        <p class="template-limit-note">{{.LimitMessage}}</p>
+        {{end}}
         <div id="add-template-error" class="form-error" style="display:none"></div>
     </div>
 

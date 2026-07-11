@@ -1,6 +1,7 @@
 package middleware_test
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rsherman/draftsky/internal/auth"
+	db "github.com/rsherman/draftsky/internal/db/sqlc"
 	"github.com/rsherman/draftsky/internal/middleware"
 )
 
@@ -179,6 +181,52 @@ func TestRequireCSRF_FormFieldFallback(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 with form-field token, got %d", w.Code)
+	}
+}
+
+// fakePlanLookup is an in-memory middleware.PlanLookup for RequirePaidPlan tests.
+type fakePlanLookup struct {
+	user db.User
+	err  error
+}
+
+func (f fakePlanLookup) GetUserByDID(_ context.Context, _ string) (db.User, error) {
+	return f.user, f.err
+}
+
+// paidPlanRouter mounts RequirePaidPlan behind a seed middleware that stands in for
+// RequireAuth by populating the DID in context.
+func paidPlanRouter(lookup middleware.PlanLookup) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	seed := func(c *gin.Context) { c.Set(middleware.ContextKeyDID, "did:plc:me") }
+	r.GET("/paid", seed, middleware.RequirePaidPlan(lookup), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	return r
+}
+
+func TestRequirePaidPlan_PaidPasses(t *testing.T) {
+	r := paidPlanRouter(fakePlanLookup{user: db.User{Did: "did:plc:me", Plan: "paid"}})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/paid", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("paid user: want 200, got %d (body %s)", w.Code, w.Body.String())
+	}
+}
+
+func TestRequirePaidPlan_FreeBlocked(t *testing.T) {
+	r := paidPlanRouter(fakePlanLookup{user: db.User{Did: "did:plc:me", Plan: "free"}})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/paid", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("free user: want 403, got %d (body %s)", w.Code, w.Body.String())
 	}
 }
 
