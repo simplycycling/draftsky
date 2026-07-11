@@ -1,18 +1,23 @@
 {{define "notification-row"}}
-{{/* A row is clickable only when it resolves to a post thread. Follows are inert
-     for now (no profiles yet) — rendered without an onclick or pointer cursor.
-     Unread rows carry an accent left-border, the same language as .post-card-focal. */}}
+{{/* Reply/mention/quote/like/repost rows link to the relevant post thread. Follow rows
+     now link to the follower's profile (closing the loop that was pending profiles).
+     The avatar and actor name always link to the profile (stopPropagation keeps the
+     row-level thread navigation from firing). Unread rows carry an accent left-border,
+     the same language as .post-card-focal. */}}
 <li class="post-card notification-row{{if not .IsRead}} notification-unread{{end}}"
-    {{if .Clickable}}data-target-uri="{{safeAtURI .TargetURI}}" onclick="navigateToThread(event, this.dataset.targetUri)" style="cursor:pointer"{{end}}>
+    {{if .Clickable}}data-target-uri="{{safeAtURI .TargetURI}}" onclick="navigateToThread(event, this.dataset.targetUri)" style="cursor:pointer"{{else if eq .Reason "follow"}}data-profile-handle="{{.Author.Handle}}" onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer"{{end}}>
     <div class="notification-inner">
         {{if .Author.Avatar}}
-        <img class="notification-avatar" src="{{derefStr .Author.Avatar}}" alt="" loading="lazy">
+        <img class="notification-avatar" src="{{derefStr .Author.Avatar}}" alt="" loading="lazy"
+             data-profile-handle="{{.Author.Handle}}" onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer">
         {{else}}
-        <div class="notification-avatar notification-avatar-initials">{{initials .Author.DisplayName .Author.Handle}}</div>
+        <div class="notification-avatar notification-avatar-initials"
+             data-profile-handle="{{.Author.Handle}}" onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer">{{initials .Author.DisplayName .Author.Handle}}</div>
         {{end}}
         <div class="notification-body">
             <div class="notification-line">
-                <span class="notification-actor">{{if .Author.DisplayName}}{{.Author.DisplayName}}{{else}}@{{.Author.Handle}}{{end}}</span>
+                <span class="notification-actor" data-profile-handle="{{.Author.Handle}}"
+                      onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer">{{if .Author.DisplayName}}{{.Author.DisplayName}}{{else}}@{{.Author.Handle}}{{end}}</span>
                 <span class="notification-reason">{{.ReasonLine}}</span>
                 <span class="post-timestamp">{{relativeTime .IndexedAt}}</span>
             </div>

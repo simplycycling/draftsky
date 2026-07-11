@@ -50,7 +50,10 @@
     </div>
     {{end}}
     <div class="post-header">
-        <div class="post-author">
+        {{/* Author block navigates to the profile; stopPropagation (in navigateToProfile)
+             keeps the card-level thread navigation from also firing. */}}
+        <div class="post-author" data-profile-handle="{{.Author.Handle}}"
+             onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer">
             {{if .Author.Avatar}}
             <img class="post-author-avatar" src="{{derefStr .Author.Avatar}}" alt="" loading="lazy">
             {{else}}
@@ -111,7 +114,8 @@
              data-quoted-uri="{{safeAtURI .Quoted.URI}}"
              onclick="event.stopPropagation(); navigateToThread(event, this.dataset.quotedUri)"
              style="cursor:pointer">
-            <div class="quoted-header">
+            <div class="quoted-header" data-profile-handle="{{.Quoted.Author.Handle}}"
+                 onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer">
                 {{if .Quoted.Author.Avatar}}
                 <img class="quoted-avatar" src="{{derefStr .Quoted.Author.Avatar}}" alt="" loading="lazy">
                 {{else}}

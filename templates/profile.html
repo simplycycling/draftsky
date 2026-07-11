@@ -1,0 +1,88 @@
+{{define "content"}}
+<div id="feed-root" class="profile-root">
+    <div class="feed-controls">
+        <div class="feed-controls-inner">
+            <button class="btn-back" onclick="window.history.length > 1 ? window.history.back() : (window.location.href = '/')">← Back</button>
+            <span class="feed-label">{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}@{{.Profile.Handle}}{{end}}</span>
+        </div>
+    </div>
+
+    <header class="profile-header">
+        <div class="profile-banner">
+            {{if .Profile.Banner}}
+            <img class="profile-banner-img" src="{{.Profile.Banner}}" alt="" loading="lazy">
+            {{end}}
+        </div>
+        <div class="profile-header-body">
+            <div class="profile-avatar-row">
+                {{if .Profile.Avatar}}
+                <img class="profile-avatar" src="{{.Profile.Avatar}}" alt="">
+                {{else}}
+                <div class="profile-avatar profile-avatar-initials">{{initials .Profile.DisplayName .Profile.Handle}}</div>
+                {{end}}
+                <div class="profile-actions">
+                    {{if .Profile.IsMe}}
+                    <button type="button" class="btn-secondary" id="profile-edit-btn" onclick="showProfileEdit()">Edit profile</button>
+                    {{else}}
+                    <button type="button" class="btn-secondary profile-follow-btn{{if .Profile.FollowedByMe}} following{{end}}"
+                            id="profile-follow-btn"
+                            data-did="{{.Profile.DID}}"
+                            data-following="{{if .Profile.FollowedByMe}}true{{else}}false{{end}}"
+                            data-follow-uri="{{safeAtURI .Profile.FollowURI}}"
+                            onclick="toggleFollow(this)">{{if .Profile.FollowedByMe}}Following{{else}}Follow{{end}}</button>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="profile-identity">
+                {{if .Profile.DisplayName}}<h1 class="profile-display-name">{{.Profile.DisplayName}}</h1>{{end}}
+                <span class="profile-handle">@{{.Profile.Handle}}</span>
+            </div>
+
+            {{if .Profile.Description}}
+            <p class="profile-bio">{{highlightFacets .Profile.Description}}</p>
+            {{end}}
+
+            <div class="profile-stats">
+                <span class="profile-stat"><strong>{{formatCount .Profile.FollowsCount}}</strong> Following</span>
+                <span class="profile-stat"><strong>{{formatCount .Profile.FollowersCount}}</strong> Followers</span>
+                <span class="profile-stat"><strong>{{formatCount .Profile.PostsCount}}</strong> Posts</span>
+            </div>
+
+            {{if .Profile.IsMe}}
+            {{/* Inline edit form (own profile only). display_name / description are the
+                 only editable fields — avatar/banner upload is deferred. Counters mirror
+                 the template-form rune counting. Submit goes to PUT /api/profile via
+                 fetch (CSP-safe; no hx-on). */}}
+            <form id="profile-edit-form" class="profile-edit-form" style="display:none" onsubmit="submitProfileEdit(event)">
+                <label class="profile-edit-label">
+                    <span class="profile-edit-caption">Display name <span class="char-counter" id="profile-name-counter"></span></span>
+                    <input type="text" id="profile-edit-name" name="display_name"
+                           value="{{.Profile.DisplayName}}" oninput="updateProfileCounters()" autocomplete="off">
+                </label>
+                <label class="profile-edit-label">
+                    <span class="profile-edit-caption">Bio <span class="char-counter" id="profile-bio-counter"></span></span>
+                    <textarea id="profile-edit-bio" name="description" rows="4"
+                              oninput="updateProfileCounters()">{{.Profile.Description}}</textarea>
+                </label>
+                <div class="profile-edit-actions">
+                    <button type="button" class="btn-cancel" onclick="cancelProfileEdit()">Cancel</button>
+                    <button type="submit" class="btn-post" id="profile-save-btn">Save</button>
+                </div>
+                <div class="profile-edit-error" id="profile-edit-error" style="display:none"></div>
+            </form>
+            {{end}}
+        </div>
+    </header>
+
+    {{if .FeedPage.Posts}}
+    <ul id="post-list" class="post-list">
+        {{template "feed-more" .}}
+    </ul>
+    {{else}}
+    <div class="feed-empty">
+        <p class="muted-text">No posts yet.</p>
+    </div>
+    {{end}}
+</div>
+{{end}}

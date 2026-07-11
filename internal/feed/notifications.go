@@ -51,11 +51,12 @@ func (n Notification) ReasonLine() string {
 	}
 }
 
-// TargetURI returns the AT URI a notification row should link through to, or ""
-// when the notification is not clickable. For like/repost the best destination is
-// your own post that was acted on (ReasonSubjectURI); for reply/mention/quote it is
+// TargetURI returns the AT URI a notification row should link through to for a THREAD
+// view, or "" when the reason has no post target. For like/repost the best destination
+// is your own post that was acted on (ReasonSubjectURI); for reply/mention/quote it is
 // the actor's post itself (URI), whose thread view shows the surrounding context.
-// Follows (and unknown reasons) are non-clickable for now — profiles don't exist yet.
+// Follows have no post target (they link to the follower's profile — see the template),
+// so they return "" here.
 func (n Notification) TargetURI() string {
 	switch n.Reason {
 	case "like", "repost":
@@ -67,7 +68,9 @@ func (n Notification) TargetURI() string {
 	}
 }
 
-// Clickable reports whether the row should be rendered as a link to a thread.
+// Clickable reports whether the row should be rendered as a link to a post thread.
+// Follow rows are not thread-clickable but are still clickable through to the
+// follower's profile; that path is handled in the template, keyed on Reason.
 func (n Notification) Clickable() bool {
 	return n.TargetURI() != ""
 }

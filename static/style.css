@@ -1869,3 +1869,194 @@ button {
     font-size: 0.85rem;
     color: var(--color-muted);
 }
+
+/* =========================================================
+   Profile view
+   ========================================================= */
+
+.profile-header {
+    border-bottom: 1px solid var(--color-card);
+}
+
+.profile-banner {
+    height: 150px;
+    background: var(--color-card);
+    overflow: hidden;
+}
+
+.profile-banner-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.profile-header-body {
+    padding: 0 16px 16px;
+}
+
+.profile-avatar-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    /* Pull the avatar up so it overlaps the banner, Bluesky-style. */
+    margin-top: -40px;
+    margin-bottom: 10px;
+}
+
+.profile-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: var(--radius-full);
+    object-fit: cover;
+    background: var(--color-card);
+    border: 3px solid var(--color-bg);
+    flex-shrink: 0;
+}
+
+.profile-avatar.profile-avatar-initials {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+
+.profile-actions {
+    /* Sit on the baseline of the avatar row, clear of the overlapped banner. */
+    padding-bottom: 4px;
+}
+
+.btn-secondary {
+    background: none;
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius-full);
+    color: var(--color-text);
+    font-family: var(--font);
+    font-size: 0.85rem;
+    font-weight: 700;
+    padding: 7px 16px;
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+.btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.profile-follow-btn.following {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+.profile-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 10px;
+}
+
+.profile-display-name {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--color-text);
+    line-height: 1.2;
+}
+
+.profile-handle {
+    font-size: 0.9rem;
+    color: var(--color-muted);
+}
+
+.profile-bio {
+    font-size: 0.95rem;
+    color: var(--color-text);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-bottom: 12px;
+}
+
+.profile-stats {
+    display: flex;
+    gap: 18px;
+    font-size: 0.9rem;
+    color: var(--color-muted);
+}
+
+.profile-stat strong {
+    color: var(--color-text);
+    font-weight: 700;
+}
+
+/* ---- Own-profile inline edit form ---- */
+
+.profile-edit-form {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.profile-edit-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.profile-edit-caption {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--color-muted);
+}
+
+.profile-edit-form input,
+.profile-edit-form textarea {
+    background: var(--color-bg);
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font-family: var(--font);
+    font-size: 0.95rem;
+    padding: 8px 10px;
+    width: 100%;
+    resize: vertical;
+}
+
+.profile-edit-form input:focus,
+.profile-edit-form textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+.profile-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.profile-edit-error {
+    color: var(--color-error);
+    font-size: 0.85rem;
+}
+
+@media (max-width: 480px) {
+    .profile-avatar {
+        width: 64px;
+        height: 64px;
+    }
+    .profile-avatar-row {
+        margin-top: -32px;
+    }
+}

@@ -148,6 +148,7 @@ func main() {
 				"Disallow: /api/\n"+
 				"Disallow: /auth/\n"+
 				"Disallow: /feed/\n"+
+				"Disallow: /profile/\n"+
 				"Disallow: /templates\n"+
 				"Disallow: /settings\n",
 		))
@@ -188,6 +189,8 @@ func main() {
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
 	web.GET("/feed/custom", uiH.HandleCustomFeedPartial)
+	web.GET("/profile/:actor", uiH.HandleProfilePage)
+	web.GET("/profile/:actor/feed", uiH.HandleProfileFeedPartial)
 	web.GET("/templates", uiH.HandleTemplatesPage)
 	web.GET("/settings", uiH.HandleSettingsPage)
 	web.POST("/templates", uiH.HandleWebCreateTemplate)
@@ -206,6 +209,10 @@ func main() {
 	api.GET("/feed/hashtags", feedH.HandleGetHashtagFeed)
 	api.GET("/notifications", feedH.HandleGetNotifications)
 	api.GET("/notifications/unread-count", feedH.HandleGetUnreadCount)
+
+	profileH := handlers.NewProfileHandler(queries, feedClient)
+	api.GET("/profile/:actor", profileH.HandleGetProfile)
+	api.GET("/profile/:actor/feed", profileH.HandleGetProfileFeed)
 
 	// Rate-limited operations — 60 req/min per DID for template CRUD and likes.
 	opsLimiter := middleware.NewOperationsRateLimiter()
@@ -231,6 +238,12 @@ func main() {
 	repostH := handlers.NewRepostHandler(oauthApp)
 	rated.POST("/repost", repostH.HandleCreateRepost)
 	rated.DELETE("/repost", repostH.HandleDeleteRepost)
+
+	rated.PUT("/profile", profileH.HandleUpdateProfile)
+
+	followH := handlers.NewFollowHandler(oauthApp)
+	rated.POST("/follow", followH.HandleCreateFollow)
+	rated.DELETE("/follow", followH.HandleDeleteFollow)
 
 	slog.Info("starting server", "port", port, "env", appEnv)
 	if err := r.Run(":" + port); err != nil {

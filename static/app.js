@@ -269,10 +269,21 @@ document.addEventListener('keydown', e => {
 function navigateToThread(evt, uri) {
     if (!uri) return;
     const blocked = evt.target.closest(
-        '.post-count, .post-hashtag, .link-card, .post-image-link, .quoted-card, .post-video, a, button'
+        '.post-count, .post-hashtag, .link-card, .post-image-link, .quoted-card, .post-video, .post-author, a, button'
     );
     if (blocked) return;
     window.location.href = '/thread?uri=' + encodeURIComponent(uri);
+}
+
+// navigateToProfile sends the user to a handle's profile view. Wired onto author
+// avatars and name/handle blocks; stopPropagation keeps the surrounding card's
+// thread navigation (or a notification row's) from also firing. encodeURIComponent
+// leaves handle dots intact (rogersherman.com stays un-mangled), and Gin's :actor
+// param matches the whole dotted segment.
+function navigateToProfile(evt, handle) {
+    if (evt) evt.stopPropagation();
+    if (!handle) return;
+    window.location.href = '/profile/' + encodeURIComponent(handle);
 }
 
 // --- Repost / Quote menu ---
@@ -935,3 +946,133 @@ async function pollUnreadCount() {
         if (!document.hidden) pollUnreadCount();
     });
 })();
+
+// --- Profile editing (own profile only) ---
+
+// Profile field limits mirror the server-side rune caps in profile.go. Counting is
+// by code point ([...str].length), matching the template-form counters — server
+// validation is the enforcement; these are UX only.
+const PROFILE_NAME_MAX = 64;
+const PROFILE_BIO_MAX = 256;
+
+function showProfileEdit() {
+    const btn = document.getElementById('profile-edit-btn');
+    const form = document.getElementById('profile-edit-form');
+    if (btn) btn.style.display = 'none';
+    if (form) {
+        form.style.display = 'block';
+        updateProfileCounters();
+        const nameInput = document.getElementById('profile-edit-name');
+        if (nameInput) nameInput.focus();
+    }
+}
+
+function cancelProfileEdit() {
+    const btn = document.getElementById('profile-edit-btn');
+    const form = document.getElementById('profile-edit-form');
+    const err = document.getElementById('profile-edit-error');
+    if (form) form.style.display = 'none';
+    if (btn) btn.style.display = '';
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+}
+
+function updateProfileCounters() {
+    const nameInput = document.getElementById('profile-edit-name');
+    const bioInput = document.getElementById('profile-edit-bio');
+    const nameCounter = document.getElementById('profile-name-counter');
+    const bioCounter = document.getElementById('profile-bio-counter');
+    let over = false;
+    if (nameInput && nameCounter) {
+        const rem = PROFILE_NAME_MAX - [...nameInput.value].length;
+        nameCounter.textContent = String(rem);
+        nameCounter.className = 'char-counter' + (rem < 0 ? ' over' : rem < 10 ? ' warn' : '');
+        if (rem < 0) over = true;
+    }
+    if (bioInput && bioCounter) {
+        const rem = PROFILE_BIO_MAX - [...bioInput.value].length;
+        bioCounter.textContent = String(rem);
+        bioCounter.className = 'char-counter' + (rem < 0 ? ' over' : rem < 20 ? ' warn' : '');
+        if (rem < 0) over = true;
+    }
+    const saveBtn = document.getElementById('profile-save-btn');
+    if (saveBtn) saveBtn.disabled = over;
+}
+
+// submitProfileEdit PUTs the display name + bio to /api/profile (form-encoded, matching
+// the handler's c.PostForm reads) and reloads on success so the header re-renders from
+// the fresh server view — the reload is also the avatar-survival check: getProfile
+// returns the preserved avatar/banner.
+async function submitProfileEdit(evt) {
+    evt.preventDefault();
+    const nameInput = document.getElementById('profile-edit-name');
+    const bioInput = document.getElementById('profile-edit-bio');
+    const err = document.getElementById('profile-edit-error');
+    const saveBtn = document.getElementById('profile-save-btn');
+
+    const body = new URLSearchParams({
+        display_name: nameInput ? nameInput.value : '',
+        description:  bioInput ? bioInput.value : '',
+    });
+
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+
+    try {
+        const res = await fetch('/api/profile', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...csrfHeaders() },
+            body,
+        });
+        if (res.ok) {
+            window.location.reload();
+            return;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (err) { err.textContent = data.error || 'Failed to save profile.'; err.style.display = 'block'; }
+    } catch (_) {
+        if (err) { err.textContent = 'Network error. Please try again.'; err.style.display = 'block'; }
+    }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+}
+
+// --- Follow / unfollow (others' profiles) ---
+
+// toggleFollow flips the follow state via /api/follow, mirroring the like/repost record
+// pattern: create returns the new follow record URI (needed to unfollow), delete clears
+// it. The button updates optimistically and reconciles on response.
+async function toggleFollow(btn) {
+    const following = btn.dataset.following === 'true';
+    btn.disabled = true;
+    try {
+        if (following) {
+            const params = new URLSearchParams({ follow_uri: btn.dataset.followUri || '' });
+            const res = await fetch('/api/follow?' + params.toString(), {
+                method: 'DELETE',
+                headers: { ...csrfHeaders() },
+            });
+            if (res.ok) {
+                btn.dataset.following = 'false';
+                btn.dataset.followUri = '';
+                btn.classList.remove('following');
+                btn.textContent = 'Follow';
+            }
+        } else {
+            const body = new URLSearchParams({ did: btn.dataset.did || '' });
+            const res = await fetch('/api/follow', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...csrfHeaders() },
+                body,
+            });
+            if (res.ok) {
+                const data = await res.json().catch(() => ({}));
+                btn.dataset.following = 'true';
+                btn.dataset.followUri = data.follow_uri || '';
+                btn.classList.add('following');
+                btn.textContent = 'Following';
+            }
+        }
+    } catch (_) {
+        // Non-fatal: the button state simply stays as it was.
+    }
+    btn.disabled = false;
+}

@@ -111,6 +111,7 @@ type UIHandler struct {
 	tmplHome          *template.Template
 	tmplTemplates     *template.Template
 	tmplThread        *template.Template
+	tmplProfile       *template.Template
 	tmplNotifications *template.Template
 	tmplSettings      *template.Template
 	tmplLogin         *template.Template
@@ -266,6 +267,17 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmplProfile, err := template.New("").Funcs(funcMap).ParseFiles(
+		"templates/layout.html",
+		"templates/partials/composer.html",
+		"templates/partials/post_card.html",
+		"templates/partials/feed.html",
+		"templates/partials/feed_controls.html",
+		"templates/profile.html",
+	)
+	if err != nil {
+		return nil, err
+	}
 	tmplNotifications, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
@@ -302,6 +314,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		tmplHome:          tmplHome,
 		tmplTemplates:     tmplTemplates,
 		tmplThread:        tmplThread,
+		tmplProfile:       tmplProfile,
 		tmplNotifications: tmplNotifications,
 		tmplSettings:      tmplSettings,
 		tmplLogin:         tmplLogin,

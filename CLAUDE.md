@@ -378,6 +378,26 @@ draftsky/
     until a side effect (error rendering, input clearing) never runs. Use delegated
     `htmx:*` listeners in app.js instead (one `htmx:afterRequest` dispatcher keyed on
     `evt.detail.elt`). Plain-JSON `hx-vals` is fine; `hx-vals="js:..."` would not be.
+18. **`putRecord` + indigo's non-omitempty `SwapRecord` = `InvalidSwap`.** indigo's
+    `RepoPutRecord_Input.SwapRecord` is `*string` with **no** `omitempty`, so a nil value
+    serialises as `"swapRecord": null`. In AT Protocol a *null* swapRecord is not "skip
+    the check" — it asserts *the record does not currently exist*. Updating an existing
+    record (e.g. `app.bsky.actor.profile/self` to edit a bio) therefore fails with
+    `HTTP 400 InvalidSwap: Record was at <cid>` — nothing is written, but the write is
+    rejected. Fix: on the get-then-put, capture the current record's CID from the
+    `getRecord` response and pass it as `SwapRecord` (a real compare-and-swap, which also
+    guards against clobbering avatar/banner blobs in a read→write race). Leave it nil only
+    for a genuine create (no record yet), where null="assert none exists" is correct. This
+    passed build, unit tests, and template-render tests — it only surfaced against a live
+    PDS (see Gotcha 16: async/external-API behaviour needs one real execution).
+19. **Test mutations touch only rows the test created.** A test that writes to a shared
+    database (templates, post_history, users) must confine every insert/update/delete to
+    rows it created in that same run, and destructive cleanup must match on the **id
+    captured at creation time**, never on a name/handle/other human-meaningful field.
+    Matching cleanup on a name (`DELETE ... WHERE name = 'Devils Game'`) will silently
+    wipe a real row a developer happens to have with that name; matching on the captured
+    id (`WHERE id = <id returned by the create>`) cannot. Capture the id the create
+    returns, use it for teardown, and scope every assertion to it.
 
 ---
 
