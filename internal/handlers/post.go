@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,17 +41,72 @@ func (h *PostHandler) limiterFor(did string) *rate.Limiter {
 }
 
 type createPostRequest struct {
-	Text           string `json:"text"             binding:"required"`
+	// Text is not `binding:"required"` because a bare quote-repost (quote refs
+	// present, empty body) is valid on Bluesky. Emptiness is validated below,
+	// conditional on whether quote refs are supplied.
+	Text           string `json:"text"`
 	TemplateID     *int32 `json:"template_id"`
 	ReplyParentURI string `json:"reply_parent_uri"`
 	ReplyParentCID string `json:"reply_parent_cid"`
 	ReplyRootURI   string `json:"reply_root_uri"`
 	ReplyRootCID   string `json:"reply_root_cid"`
+	QuoteURI       string `json:"quote_uri"`
+	QuoteCID       string `json:"quote_cid"`
 }
 
 type createPostResponse struct {
 	URI string `json:"uri"`
 	CID string `json:"cid"`
+}
+
+// postRefs holds the reply/quote refs extracted from a validated create-post request.
+// At most one of reply/quote is non-nil (they are mutually exclusive in v1).
+type postRefs struct {
+	reply *bluesky.ReplyRefs
+	quote *bluesky.QuoteRef
+}
+
+// validatePostRefs enforces the reply/quote/text combination rules and extracts the
+// refs. It returns a non-empty message (the 400 body) on invalid input; the caller
+// maps that to http.StatusBadRequest. Rules:
+//   - reply refs are all-or-nothing (all four fields, or none);
+//   - quote refs are both-or-neither (uri and cid);
+//   - a post cannot be both a reply and a quote;
+//   - text is required unless the post is a bare quote-repost (quote refs present).
+func validatePostRefs(req createPostRequest) (postRefs, string) {
+	hasReplyAny := req.ReplyParentURI != "" || req.ReplyParentCID != "" || req.ReplyRootURI != "" || req.ReplyRootCID != ""
+	hasReplyAll := req.ReplyParentURI != "" && req.ReplyParentCID != "" && req.ReplyRootURI != "" && req.ReplyRootCID != ""
+	if hasReplyAny && !hasReplyAll {
+		return postRefs{}, "reply requires all four fields: reply_parent_uri, reply_parent_cid, reply_root_uri, reply_root_cid"
+	}
+
+	hasQuoteAny := req.QuoteURI != "" || req.QuoteCID != ""
+	hasQuoteAll := req.QuoteURI != "" && req.QuoteCID != ""
+	if hasQuoteAny && !hasQuoteAll {
+		return postRefs{}, "quote requires both fields: quote_uri, quote_cid"
+	}
+
+	if hasReplyAll && hasQuoteAll {
+		return postRefs{}, "a post cannot be both a reply and a quote"
+	}
+
+	if strings.TrimSpace(req.Text) == "" && !hasQuoteAll {
+		return postRefs{}, "text is required"
+	}
+
+	var refs postRefs
+	if hasReplyAll {
+		refs.reply = &bluesky.ReplyRefs{
+			ParentURI: req.ReplyParentURI,
+			ParentCID: req.ReplyParentCID,
+			RootURI:   req.ReplyRootURI,
+			RootCID:   req.ReplyRootCID,
+		}
+	}
+	if hasQuoteAll {
+		refs.quote = &bluesky.QuoteRef{URI: req.QuoteURI, CID: req.QuoteCID}
+	}
+	return refs, ""
 }
 
 // HandleCreatePost composes and submits a post to Bluesky.
@@ -100,24 +156,13 @@ func (h *PostHandler) HandleCreatePost(c *gin.Context) {
 		suffix = tmpl.Suffix
 	}
 
-	// Validate reply refs: either all four are present or none are.
-	hasAny := req.ReplyParentURI != "" || req.ReplyParentCID != "" || req.ReplyRootURI != "" || req.ReplyRootCID != ""
-	hasAll := req.ReplyParentURI != "" && req.ReplyParentCID != "" && req.ReplyRootURI != "" && req.ReplyRootCID != ""
-	if hasAny && !hasAll {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reply requires all four fields: reply_parent_uri, reply_parent_cid, reply_root_uri, reply_root_cid"})
+	refs, verr := validatePostRefs(req)
+	if verr != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": verr})
 		return
 	}
-	var replyRefs *bluesky.ReplyRefs
-	if hasAll {
-		replyRefs = &bluesky.ReplyRefs{
-			ParentURI: req.ReplyParentURI,
-			ParentCID: req.ReplyParentCID,
-			RootURI:   req.ReplyRootURI,
-			RootCID:   req.ReplyRootCID,
-		}
-	}
 
-	result, err := h.poster.Post(c.Request.Context(), did, sessionID, req.Text, suffix, replyRefs)
+	result, err := h.poster.Post(c.Request.Context(), did, sessionID, req.Text, suffix, refs.reply, refs.quote)
 	if err != nil {
 		if bluesky.IsRateLimitError(err) {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Bluesky is rate limiting your account — try again shortly."})

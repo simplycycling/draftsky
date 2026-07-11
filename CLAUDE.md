@@ -223,7 +223,7 @@ Applied migrations: 000001_create_users, 000002_create_templates, 000003_add_pla
 | GET    | /feed/following  | HTMX partial — Following feed                   |
 | GET    | /feed/hashtags   | HTMX partial — merged hashtag feed              |
 | GET    | /templates       | Template management page                        |
-| GET    | /settings        | Settings (page not yet built — priority item)   |
+| GET    | /settings        | Settings page (Account + theme selector)        |
 | GET    | /login           | Login page (public; bounces if authed)          |
 
 ### Infrastructure
@@ -425,36 +425,48 @@ in Docker (`docker start draftsky-dev-db`).
   emails excluded), incoming mentions accent-rendered in feeds
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
+- Free-tier enforcement: server-side 5-template cap on both create paths (JSON API +
+  HTMX web form), 403 with an upgrade message (permission boundary, not 409); paid
+  users short-circuit before the count query. Templates page renders the Add form
+  disabled (inputs + button) with an inline muted note at the cap; edits/deletes/
+  reorders are never capped. `RequirePaidPlan` middleware exists for future paid-only
+  endpoints (not yet mounted; the theme endpoint keeps its own inline check)
+- Trusted proxies scoped to RFC 1918 private ranges + RFC 6598 CGNAT (`10/8`,
+  `172.16/12`, `192.168/16`, `100.64/10`) so Railway's internal proxy's X-Forwarded-For
+  is honoured but external clients cannot forge a client IP (log-accuracy-only today —
+  rate limiting is per-DID)
+- Quote posts: the repost count opens a dependency-free Repost/Quote popover (anchored
+  div in app.js, outside-click/Escape close, stopPropagation so card nav never fires;
+  Repost/Undo go straight to /api/repost via fetch and swap the span fragment in place,
+  carrying data-author/data-text forward for a later Quote). Composer gains a quote mode
+  mirroring reply mode but with the quoted-post preview BELOW the textarea; reply and
+  quote contexts are mutually exclusive (opening one clears the other). Submission adds
+  quote_uri/quote_cid; `validatePostRefs` enforces both-or-neither, quote+reply→400, and
+  empty text allowed only with quote refs (bare quote-repost). `Post()` attaches an
+  `app.bsky.embed.record` embed (via `buildQuoteEmbed`) that coexists with hashtag +
+  mention facets; outgoing quotes render through the existing QuotedPost pipeline.
 - Railway deployment, custom domain, bare-domain 301 redirect
 
-### Current priority order (pre-GA ladder — GA after item 6)
-1. **Free tier enforcement** — 5-template limit on POST /api/templates (server-side,
-   403/409 with a clear message when a free user has 5), `RequirePaidPlan` middleware
-   for future paid-only endpoints; scope trusted proxies to Railway's CIDR (replace
-   the 0.0.0.0/0 placeholder)
-2. **Quote posts** — the repost button becomes a small Repost/Quote menu; Quote opens
-   the composer in quote mode (like reply mode, carrying `{uri, cid}`), which attaches
-   an `app.bsky.embed.record` to the post record. Templates work in quotes. Quote mode
-   and reply mode are mutually exclusive in v1.
-3. **Profiles** — `/profile/<handle>` view: getProfile header (avatar, banner, display
+### Current priority order (pre-GA ladder — GA after item 4)
+1. **Profiles** — `/profile/<handle>` view: getProfile header (avatar, banner, display
    name, bio, follower/following/post counts) + getAuthorFeed with cursor pagination
    through the existing feed rendering. Own profile gets text-only editing (display
    name + bio via putRecord on the profile record). Avatar/banner UPLOAD is deferred
    to photo posting post-GA (needs uploadBlob). Clicking avatars/handles anywhere in
    feeds navigates to the profile.
-4. **Clickable mentions** — the accent mention spans in feeds get click-through to
+2. **Clickable mentions** — the accent mention spans in feeds get click-through to
    `/profile/<handle>` (stopPropagation so card click-through survives, same pattern
    as hashtags)
-5. **Mention typeahead** — composer: typing `@` + chars triggers a debounced
+3. **Mention typeahead** — composer: typing `@` + chars triggers a debounced
    searchActorsTypeahead dropdown; keyboard navigation (up/down/enter/escape),
    insert-on-select. Works in both new-post and reply/quote modes.
-6. **Hashtag context menu** — Bluesky-style popover on hashtag click: "See #tag posts"
+4. **Hashtag context menu** — Bluesky-style popover on hashtag click: "See #tag posts"
    (existing hashtag feed) and "See #tag posts by user" (author feed filtered — check
    whether searchPosts supports author+tag; if not, defer this half too and note it).
    "Mute #tag" is explicitly DEFERRED post-GA (needs a mutes table + filtering on
    every feed path).
 
-After item 6: **GA**.
+After item 4: **GA**.
 
 ### Post-GA / longer term
 - **Hashtag activity counter** (small) — when the post-submit hashtag feed appears,
@@ -485,7 +497,8 @@ After item 6: **GA**.
 ### Technical debt
 - CSP uses 'unsafe-inline' — migrate to nonces
 - Rate limiter sync.Map grows unbounded — needs cleanup or Redis at scale
-- Trusted proxies at 0.0.0.0/0 pending Railway CIDR scoping
+- Trusted proxies pinned to private/CGNAT ranges rather than a Railway-published edge
+  CIDR (none exists today); revisit if Railway documents a stable public egress range
 
 ---
 
@@ -543,7 +556,7 @@ All colours are defined in the `:root {}` block in `/static/style.css`.
 
 Themes are sets of CSS variable overrides. The user's theme is injected as a class on
 the `<body>` tag by the Go template, based on the `theme` column. Free users are locked
-to `ocean`; paid users can select any theme (settings page — pending).
+to `ocean`; paid users can select any theme from the settings page.
 
 | Theme key  | Name              | Plan     | Accent    | Base                    |
 |------------|-------------------|----------|-----------|-------------------------|
@@ -573,7 +586,8 @@ DraftSky uses a freemium model on web and an ad-supported + one-time purchase mo
 - Free tier: up to 5 templates, Following feed, posting, replies, Ocean theme only
 - Paid tier: unlimited templates, all themes, tabbed hashtag feed (future), hashtag
   performance analytics (future — the paid flagship; see roadmap)
-- Enforced via the `plan` column (enforcement pending — priority item 5)
+- Enforced via the `plan` column: the 5-template cap and theme gate are live server-side;
+  `RequirePaidPlan` middleware is ready for future paid-only endpoints (analytics)
 
 **iOS (future):**
 - Ads by default (AdMob or equivalent); non-consumable IAP via StoreKit 2 removes them

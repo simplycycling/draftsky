@@ -11,9 +11,9 @@ import (
 // non-matches that keep it from firing on emails, mid-word '@', or a bare '@'.
 func TestDetectMentions(t *testing.T) {
 	tests := []struct {
-		name  string
-		text  string
-		want  []string // expected handles (no '@'), in order
+		name string
+		text string
+		want []string // expected handles (no '@'), in order
 	}{
 		{name: "two segment", text: "hi @rustypants.com", want: []string{"rustypants.com"}},
 		{name: "bsky social", text: "@user.bsky.social hello", want: []string{"user.bsky.social"}},
@@ -48,6 +48,39 @@ func TestDetectMentions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestBuildQuoteEmbed verifies the app.bsky.embed.record embed is nil when no quote
+// is supplied and carries the StrongRef when it is.
+func TestBuildQuoteEmbed(t *testing.T) {
+	if e := buildQuoteEmbed(nil); e != nil {
+		t.Fatalf("buildQuoteEmbed(nil) = %+v, want nil", e)
+	}
+
+	const (
+		uri = "at://did:plc:abc/app.bsky.feed.post/xyz"
+		cid = "bafyquoted"
+	)
+	e := buildQuoteEmbed(&QuoteRef{URI: uri, CID: cid})
+	if e == nil {
+		t.Fatal("buildQuoteEmbed returned nil for a non-nil quote")
+	}
+	if e.EmbedRecord == nil {
+		t.Fatal("embed is not an app.bsky.embed.record (EmbedRecord is nil)")
+	}
+	if e.EmbedRecord.Record == nil {
+		t.Fatal("embed record StrongRef is nil")
+	}
+	if got := e.EmbedRecord.Record.Uri; got != uri {
+		t.Errorf("embed record uri = %q, want %q", got, uri)
+	}
+	if got := e.EmbedRecord.Record.Cid; got != cid {
+		t.Errorf("embed record cid = %q, want %q", got, cid)
+	}
+	// A quote embed must not accidentally populate the other embed variants.
+	if e.EmbedImages != nil || e.EmbedVideo != nil || e.EmbedExternal != nil || e.EmbedRecordWithMedia != nil {
+		t.Errorf("unexpected sibling embed variant set: %+v", e)
 	}
 }
 

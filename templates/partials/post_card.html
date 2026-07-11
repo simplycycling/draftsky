@@ -1,18 +1,20 @@
+{{/* The repost count is a menu trigger, not an immediate action: clicking it opens a
+     small anchored popover (built in app.js) offering Repost/Undo repost and Quote.
+     data-* carry everything the popover needs; data-author/data-text feed quote mode
+     and are re-attached by JS across a repost toggle (the server fragment omits them).
+     URI-bearing attributes use safeAtURI (Gotcha 1: data-*uri* is a URL context). */}}
 {{define "repost-button"}}
-<span id="repost-{{.URI | printf "%s"}}"
-      class="post-count post-count-repost{{if .RepostedByMe}} reposted{{end}}"
-      hx-target="closest .post-count-repost"
-      hx-swap="outerHTML"
-      {{if .RepostedByMe}}
-      hx-delete="/api/repost"
-      hx-vals='{"repost_uri": "{{.RepostURI}}", "post_uri": "{{.URI}}", "post_cid": "{{.CID}}", "count": "{{.RepostCount}}"}'
-      {{else}}
-      hx-post="/api/repost"
-      hx-vals='{"uri": "{{.URI}}", "cid": "{{.CID}}", "count": "{{.RepostCount}}"}'
-      {{end}}
-      hx-trigger="click"
+<span class="post-count post-count-repost{{if .RepostedByMe}} reposted{{end}}"
+      data-uri="{{safeAtURI .URI}}"
+      data-cid="{{.CID}}"
+      data-count="{{.RepostCount}}"
+      data-reposted="{{if .RepostedByMe}}true{{else}}false{{end}}"
+      data-repost-uri="{{safeAtURI .RepostURI}}"
+      data-author="{{.Author.Handle}}"
+      data-text="{{.Text}}"
+      onclick="openRepostMenu(event, this)"
       style="cursor:pointer"
-      title="{{if .RepostedByMe}}Undo repost{{else}}Repost{{end}}">{{formatCount .RepostCount}}</span>
+      title="Repost or quote">{{formatCount .RepostCount}}</span>
 {{end}}
 
 {{define "like-button"}}

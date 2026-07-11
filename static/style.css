@@ -1029,6 +1029,61 @@ button {
     color: var(--color-muted);
 }
 
+/* Quote context sits BELOW the textarea — where the quoted card will render — and
+   uses a full border (a card), distinct from reply mode's left-bordered strip above. */
+.composer-quote-context {
+    margin: 0 0 12px 50px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-muted);
+    background: var(--color-card);
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.quote-context-author {
+    font-weight: 600;
+    color: var(--color-accent);
+    margin-right: 6px;
+}
+
+.quote-context-text {
+    color: var(--color-muted);
+}
+
+/* Repost/Quote popover — an absolutely-positioned menu anchored to the repost count. */
+.repost-menu {
+    position: absolute;
+    z-index: 1000;
+    min-width: 140px;
+    padding: 4px;
+    background: var(--color-card);
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+}
+
+.repost-menu-item {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    color: var(--color-text);
+    font-size: 0.9rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.repost-menu-item:hover {
+    background: var(--color-surface);
+    color: var(--color-accent);
+}
+
 .composer-suffix-preview {
     margin: 0 0 12px 50px;
     padding: 8px 12px;

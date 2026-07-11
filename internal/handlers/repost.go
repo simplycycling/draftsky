@@ -143,24 +143,22 @@ func (h *RepostHandler) HandleDeleteRepost(c *gin.Context) {
 }
 
 // renderRepostButton writes the repost-button HTML fragment to the response.
-// Must stay in sync with the "repost-button" template in feed.html.
-// Uses hx-vals (contentTypePlain context) so AT URIs pass through without ZgotmplZ.
+// Must stay in sync with the "repost-button" template in post_card.html: a menu
+// trigger carrying data-* state, with onclick opening the popover built in app.js.
+// data-author/data-text are intentionally omitted here — the client re-attaches them
+// from the pre-toggle span so quote mode still works after a repost/undo, sparing the
+// handler from echoing author/text it does not hold. AT URIs are Bluesky-issued and
+// contain no double quotes, so raw interpolation into the attributes is safe.
 func renderRepostButton(c *gin.Context, pv feed.PostView) {
-	action := "Repost"
-	hxMethod := `hx-post="/api/repost"`
-	hxVals := fmt.Sprintf(`hx-vals='{"uri": %q, "cid": %q, "count": "%d"}'`, pv.URI, pv.CID, pv.RepostCount)
-	if pv.RepostedByMe {
-		action = "Undo repost"
-		hxMethod = `hx-delete="/api/repost"`
-		hxVals = fmt.Sprintf(`hx-vals='{"repost_uri": %q, "post_uri": %q, "post_cid": %q, "count": "%d"}'`, pv.RepostURI, pv.URI, pv.CID, pv.RepostCount)
-	}
 	repostedClass := ""
+	reposted := "false"
 	if pv.RepostedByMe {
 		repostedClass = " reposted"
+		reposted = "true"
 	}
 	html := fmt.Sprintf(
-		`<span class="post-count post-count-repost%s" hx-target="closest .post-count-repost" hx-swap="outerHTML" %s %s hx-trigger="click" style="cursor:pointer" title="%s">%s</span>`,
-		repostedClass, hxMethod, hxVals, action, countDisplayStr(pv.RepostCount),
+		`<span class="post-count post-count-repost%s" data-uri="%s" data-cid="%s" data-count="%d" data-reposted="%s" data-repost-uri="%s" onclick="openRepostMenu(event, this)" style="cursor:pointer" title="Repost or quote">%s</span>`,
+		repostedClass, pv.URI, pv.CID, pv.RepostCount, reposted, pv.RepostURI, countDisplayStr(pv.RepostCount),
 	)
 	c.String(http.StatusOK, html)
 }

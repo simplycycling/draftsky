@@ -24,28 +24,46 @@ function graphemeLength(str) {
 
 // --- Composer modal ---
 
-// Holds reply context when the composer is open in reply mode; null otherwise.
+// The composer is in at most one context at a time. Reply and quote are mutually
+// exclusive (v1): opening one clears the other, closing clears both.
+//   replyContext: { uri, cid, rootUri, rootCid, authorHandle, text }
+//   quoteContext: { uri, cid, authorHandle, text }
 let replyContext = null;
+let quoteContext = null;
 
-// openComposer opens the composer. Pass a reply context object to enter reply mode:
-//   { uri, cid, rootUri, rootCid, authorHandle, text }
-// Call with no argument (or null) for a normal post.
-function openComposer(ctx) {
-    replyContext = ctx || null;
+// openComposer opens the composer. mode selects the context:
+//   openComposer(ctx)            → reply mode (ctx is the reply context) or plain post (ctx null)
+//   openComposer(ctx, 'quote')   → quote mode (ctx is the quote context)
+// Passing a ctx always clears whichever context is not selected, so the two modes
+// can never both be live.
+function openComposer(ctx, mode) {
+    replyContext = null;
+    quoteContext = null;
+    if (ctx && mode === 'quote') {
+        quoteContext = ctx;
+    } else if (ctx) {
+        replyContext = ctx;
+    }
 
     const textarea = document.getElementById('composer-textarea');
     const replyDiv = document.getElementById('composer-reply-context');
+    const quoteDiv = document.getElementById('composer-quote-context');
 
     if (replyContext) {
         document.getElementById('reply-context-author').textContent = '@' + replyContext.authorHandle;
-        const preview = replyContext.text.length > 100
-            ? replyContext.text.slice(0, 100) + '…'
-            : replyContext.text;
-        document.getElementById('reply-context-text').textContent = preview;
+        document.getElementById('reply-context-text').textContent = previewText(replyContext.text);
         replyDiv.style.display = 'block';
+        quoteDiv.style.display = 'none';
         textarea.placeholder = 'Write your reply…';
+    } else if (quoteContext) {
+        document.getElementById('quote-context-author').textContent = '@' + quoteContext.authorHandle;
+        document.getElementById('quote-context-text').textContent = previewText(quoteContext.text);
+        quoteDiv.style.display = 'block';
+        replyDiv.style.display = 'none';
+        textarea.placeholder = 'Add a comment';
     } else {
         replyDiv.style.display = 'none';
+        quoteDiv.style.display = 'none';
         textarea.placeholder = "What’s up?";
     }
 
@@ -53,6 +71,11 @@ function openComposer(ctx) {
     textarea.focus();
     loadComposerTemplates();
     updateCounter();
+}
+
+// previewText truncates a post body to a compact single-line preview.
+function previewText(text) {
+    return text.length > 100 ? text.slice(0, 100) + '…' : text;
 }
 
 // openComposerReply reads reply data from a post card element's data-* attributes
@@ -68,12 +91,25 @@ function openComposerReply(el) {
     });
 }
 
+// openComposerQuote reads quote data from a repost span's data-* attributes and
+// opens the composer in quote mode.
+function openComposerQuote(el) {
+    openComposer({
+        uri:          el.dataset.uri,
+        cid:          el.dataset.cid,
+        authorHandle: el.dataset.author,
+        text:         el.dataset.text || '',
+    }, 'quote');
+}
+
 function closeComposer() {
     replyContext = null;
+    quoteContext = null;
     document.getElementById('composer-overlay').style.display = 'none';
     document.getElementById('composer-textarea').value = '';
     document.getElementById('composer-textarea').placeholder = "What’s up?";
     document.getElementById('composer-reply-context').style.display = 'none';
+    document.getElementById('composer-quote-context').style.display = 'none';
     document.getElementById('template-select').selectedIndex = 0;
     document.getElementById('suffix-preview').style.display = 'none';
     document.getElementById('suffix-preview').textContent = '';
@@ -129,8 +165,10 @@ function updateCounter() {
     counter.className = 'char-counter' +
         (remaining < 0 ? ' over' : remaining < 20 ? ' warn' : '');
 
+    // A bare quote-repost (quote context, empty body) is a valid post, so the Post
+    // button enables on quote-context-present even with an empty textarea.
     const btn = document.getElementById('composer-post-btn');
-    btn.disabled = remaining < 0 || text.trim() === '';
+    btn.disabled = remaining < 0 || (text.trim() === '' && !quoteContext);
 }
 
 function onTemplateChange() {
@@ -148,7 +186,8 @@ function onTemplateChange() {
 
 async function submitPost() {
     const text = document.getElementById('composer-textarea').value.trimStart();
-    if (!text) return;
+    // Empty text is only valid as a bare quote-repost; otherwise there is nothing to post.
+    if (!text && !quoteContext) return;
 
     const opt = selectedOption();
     const body = { text };
@@ -165,6 +204,12 @@ async function submitPost() {
         body.reply_parent_cid = replyContext.cid;
         body.reply_root_uri   = rootUri;
         body.reply_root_cid   = rootCid;
+    }
+
+    // Attach quote refs when the composer is in quote mode (mutually exclusive with reply).
+    if (quoteContext) {
+        body.quote_uri = quoteContext.uri;
+        body.quote_cid = quoteContext.cid;
     }
 
     const btn = document.getElementById('composer-post-btn');
@@ -207,9 +252,11 @@ function showComposerError(msg) {
     el.style.display = 'block';
 }
 
-// Close composer on Escape key.
+// Close composer / repost menu on Escape key. The repost menu takes precedence when
+// both are somehow open (it never is — the menu closes before the composer opens).
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+        if (_repostMenu) { closeRepostMenu(); return; }
         const overlay = document.getElementById('composer-overlay');
         if (overlay && overlay.style.display !== 'none') closeComposer();
     }
@@ -226,6 +273,133 @@ function navigateToThread(evt, uri) {
     );
     if (blocked) return;
     window.location.href = '/thread?uri=' + encodeURIComponent(uri);
+}
+
+// --- Repost / Quote menu ---
+
+// Clicking a repost count opens this small anchored popover instead of reposting
+// immediately: it offers Repost (or Undo repost) and Quote. Kept dependency-free —
+// a positioned div, not a library. The repost/undo action goes straight to
+// /api/repost via fetch and swaps the returned span fragment in place (author/text
+// carried forward so quote mode still works after a toggle). Quote opens the composer.
+let _repostMenu = null;
+let _repostMenuAnchor = null;
+
+// closeRepostMenu removes the open popover and its outside-click listener. No-op when
+// none is open.
+function closeRepostMenu() {
+    if (_repostMenu) {
+        _repostMenu.remove();
+        _repostMenu = null;
+        _repostMenuAnchor = null;
+        document.removeEventListener('click', onRepostMenuOutsideClick, true);
+    }
+}
+
+function onRepostMenuOutsideClick(evt) {
+    if (_repostMenu && !_repostMenu.contains(evt.target)) closeRepostMenu();
+}
+
+// openRepostMenu builds and positions the popover anchored to the clicked repost
+// span. stopPropagation throughout so the card's thread navigation never fires.
+function openRepostMenu(evt, el) {
+    evt.stopPropagation();
+    // A second click on the same anchor toggles the menu closed.
+    if (_repostMenu && _repostMenuAnchor === el) {
+        closeRepostMenu();
+        return;
+    }
+    closeRepostMenu();
+
+    const reposted = el.dataset.reposted === 'true';
+    const menu = document.createElement('div');
+    menu.className = 'repost-menu';
+    menu.innerHTML =
+        `<button type="button" class="repost-menu-item" data-action="repost">${reposted ? 'Undo repost' : 'Repost'}</button>` +
+        `<button type="button" class="repost-menu-item" data-action="quote">Quote</button>`;
+
+    menu.querySelector('[data-action="repost"]').addEventListener('click', function(e) {
+        e.stopPropagation();
+        closeRepostMenu();
+        if (reposted) { doUndoRepost(el); } else { doRepost(el); }
+    });
+    menu.querySelector('[data-action="quote"]').addEventListener('click', function(e) {
+        e.stopPropagation();
+        closeRepostMenu();
+        openComposerQuote(el);
+    });
+
+    document.body.appendChild(menu);
+
+    // Anchor just below the span; nudge left so the menu doesn't overflow the viewport.
+    const rect = el.getBoundingClientRect();
+    let left = rect.left + window.scrollX;
+    const top = rect.bottom + window.scrollY + 4;
+    const menuWidth = menu.offsetWidth;
+    if (left + menuWidth > window.scrollX + document.documentElement.clientWidth - 8) {
+        left = window.scrollX + document.documentElement.clientWidth - menuWidth - 8;
+    }
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+
+    _repostMenu = menu;
+    _repostMenuAnchor = el;
+    // Capture-phase so the outside-click check runs before other handlers.
+    document.addEventListener('click', onRepostMenuOutsideClick, true);
+}
+
+// replaceRepostSpan swaps oldEl for the server-returned span fragment, carrying
+// data-author/data-text forward (the fragment omits them) so a later Quote still has
+// the author handle and quoted text.
+function replaceRepostSpan(oldEl, html) {
+    const tmp = document.createElement('template');
+    tmp.innerHTML = html.trim();
+    const newEl = tmp.content.firstElementChild;
+    if (!newEl) return;
+    newEl.dataset.author = oldEl.dataset.author || '';
+    newEl.dataset.text = oldEl.dataset.text || '';
+    oldEl.replaceWith(newEl);
+}
+
+// doRepost creates a repost and swaps in the fresh span. Form-encoded body matches
+// what the handler reads via c.PostForm on POST.
+async function doRepost(el) {
+    const body = new URLSearchParams({
+        uri:   el.dataset.uri,
+        cid:   el.dataset.cid,
+        count: el.dataset.count || '0',
+    });
+    try {
+        const res = await fetch('/api/repost', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...csrfHeaders() },
+            body,
+        });
+        if (res.ok) replaceRepostSpan(el, await res.text());
+    } catch (_) {
+        // Non-fatal: the count simply stays as it was.
+    }
+}
+
+// doUndoRepost deletes the repost. HTMX's hx-delete sent these as query params, and
+// the handler reads c.Query as the fallback — Go's PostForm does not parse a DELETE
+// body — so we pass them in the query string too.
+async function doUndoRepost(el) {
+    const params = new URLSearchParams({
+        repost_uri: el.dataset.repostUri,
+        post_uri:   el.dataset.uri,
+        post_cid:   el.dataset.cid,
+        count:      el.dataset.count || '0',
+    });
+    try {
+        const res = await fetch('/api/repost?' + params.toString(), {
+            method: 'DELETE',
+            headers: { ...csrfHeaders() },
+        });
+        if (res.ok) replaceRepostSpan(el, await res.text());
+    } catch (_) {
+        // Non-fatal.
+    }
 }
 
 // --- Inline video playback ---

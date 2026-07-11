@@ -79,11 +79,38 @@ type ReplyRefs struct {
 	RootCID   string
 }
 
+// QuoteRef carries the StrongRef of the post being quoted. When present it is
+// attached to the new post as an app.bsky.embed.record embed, producing a Bluesky
+// quote post. Quote and reply are mutually exclusive in v1 (enforced at the handler).
+type QuoteRef struct {
+	URI string
+	CID string
+}
+
+// buildQuoteEmbed returns the app.bsky.embed.record embed for a quoted post, or nil
+// when quote is nil. Extracted so the embed construction can be unit-tested without a
+// live session.
+func buildQuoteEmbed(quote *QuoteRef) *appbsky.FeedPost_Embed {
+	if quote == nil {
+		return nil
+	}
+	return &appbsky.FeedPost_Embed{
+		EmbedRecord: &appbsky.EmbedRecord{
+			Record: &comatproto.RepoStrongRef{
+				Uri: quote.URI,
+				Cid: quote.CID,
+			},
+		},
+	}
+}
+
 // Post submits a post to Bluesky on behalf of the user identified by did/sessionID.
 // If suffix is non-empty it is appended to text with a space separator.
 // Hashtags in the final text are detected and annotated as richtext facets.
 // If reply is non-nil the post is submitted as a reply with the given thread refs.
-func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix string, reply *ReplyRefs) (*PostResult, error) {
+// If quote is non-nil an app.bsky.embed.record embed is attached, making the post a
+// quote post. A bare quote (empty text) is valid. Facets and the embed coexist.
+func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix string, reply *ReplyRefs, quote *QuoteRef) (*PostResult, error) {
 	did, err := syntax.ParseDID(didStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid DID %q: %w", didStr, err)
@@ -136,6 +163,10 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 				Cid: reply.ParentCID,
 			},
 		}
+	}
+
+	if embed := buildQuoteEmbed(quote); embed != nil {
+		post.Embed = embed
 	}
 
 	out, err := comatproto.RepoCreateRecord(ctx, apiClient, &comatproto.RepoCreateRecord_Input{
