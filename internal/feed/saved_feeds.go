@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/atproto/atclient"
 )
 
 // SavedFeed represents a pinned feed from the user's Bluesky preferences.
@@ -17,12 +18,23 @@ type SavedFeed struct {
 	IsTimeline  bool
 }
 
-// GetSavedFeeds fetches the user's pinned saved feeds from Bluesky preferences,
-// resolves display names for custom feeds, and returns them in preference order.
-// Only "feed" and "timeline" types are included; "list" is skipped.
-// On any failure, returns a single Following-only entry so the caller can degrade
-// gracefully without breaking the page.
-func (c *Client) GetSavedFeeds(ctx context.Context, did, sessionID string) ([]SavedFeed, error) {
+// Preferences bundles the pieces of app.bsky.actor.getPreferences DraftSky consumes,
+// fetched in a single call so a page render pays one round-trip for both the saved-feeds
+// tab bar and muted-word filtering (see GetPreferences).
+type Preferences struct {
+	SavedFeeds []SavedFeed
+	MutedWords []MutedWord
+}
+
+// GetPreferences fetches the user's Bluesky preferences ONCE and returns both the resolved
+// saved feeds (for the tab bar) and the muted words (for feed content filtering). This is
+// the page-render consumer: buildLayoutBase calls it so a single getPreferences serves both
+// the chrome and the Following feed's muted-word filter. Consumers that only need muted
+// words (feed partials, JSON API) should call GetMutedWords instead, which skips the extra
+// getFeedGenerators round-trip that saved-feed name resolution requires.
+//
+// On failure the caller degrades gracefully; see buildLayoutBase.
+func (c *Client) GetPreferences(ctx context.Context, did, sessionID string) (*Preferences, error) {
 	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
 	if err != nil {
 		return nil, err
@@ -33,6 +45,67 @@ func (c *Client) GetSavedFeeds(ctx context.Context, did, sessionID string) ([]Sa
 		return nil, fmt.Errorf("getPreferences: %w", err)
 	}
 
+	saved, err := c.resolveSavedFeedsFromPrefs(ctx, apiClient, prefs)
+	if err != nil {
+		return nil, err
+	}
+	return &Preferences{
+		SavedFeeds: saved,
+		MutedWords: mutedWordsFromPrefs(prefs),
+	}, nil
+}
+
+// GetMutedWords fetches only the user's muted words in a single getPreferences call,
+// skipping saved-feed name resolution. Used by feed fetches (partials + JSON API) that need
+// muted-word filtering but not the tab bar.
+func (c *Client) GetMutedWords(ctx context.Context, did, sessionID string) ([]MutedWord, error) {
+	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	prefs, err := appbsky.ActorGetPreferences(ctx, apiClient)
+	if err != nil {
+		return nil, fmt.Errorf("getPreferences: %w", err)
+	}
+	return mutedWordsFromPrefs(prefs), nil
+}
+
+// mutedWordsFromPrefs extracts the muted-word list from a preferences response. Multiple
+// mutedWordsPref entries are unusual but all are flattened; entries with an empty value are
+// dropped.
+func mutedWordsFromPrefs(prefs *appbsky.ActorGetPreferences_Output) []MutedWord {
+	var out []MutedWord
+	for _, pref := range prefs.Preferences {
+		if pref.ActorDefs_MutedWordsPref == nil {
+			continue
+		}
+		for _, it := range pref.ActorDefs_MutedWordsPref.Items {
+			if it == nil || it.Value == "" {
+				continue
+			}
+			mw := MutedWord{Value: it.Value}
+			for _, t := range it.Targets {
+				if t != nil {
+					mw.Targets = append(mw.Targets, *t)
+				}
+			}
+			if it.ActorTarget != nil {
+				mw.ActorTarget = *it.ActorTarget
+			}
+			if it.ExpiresAt != nil {
+				mw.ExpiresAt = *it.ExpiresAt
+			}
+			out = append(out, mw)
+		}
+	}
+	return out
+}
+
+// resolveSavedFeedsFromPrefs extracts pinned saved feeds from a preferences response and
+// resolves custom-feed display names via getFeedGenerators. Returns a single Following-only
+// entry when there are no usable pinned feeds. Split out of GetPreferences so the parsing
+// stays testable and the getFeedGenerators round-trip is confined to the saved-feeds path.
+func (c *Client) resolveSavedFeedsFromPrefs(ctx context.Context, apiClient *atclient.APIClient, prefs *appbsky.ActorGetPreferences_Output) ([]SavedFeed, error) {
 	// Use savedFeedsPrefV2 — if multiple entries exist, keep the last one.
 	var v2 *appbsky.ActorDefs_SavedFeedsPrefV2
 	for _, pref := range prefs.Preferences {
@@ -127,7 +200,7 @@ func resolveSavedFeeds(pinned []pinnedFeed, nameMap map[string]string) []SavedFe
 // GetCustomFeed fetches a page of posts from a Bluesky algorithm feed via
 // app.bsky.feed.getFeed. cursor is the opaque pagination cursor from the previous
 // response; pass "" for the first page.
-func (c *Client) GetCustomFeed(ctx context.Context, did, sessionID, feedURI, cursor string, limit int) (*FeedPage, error) {
+func (c *Client) GetCustomFeed(ctx context.Context, did, sessionID, feedURI, cursor string, limit int, mutedWords []MutedWord) (*FeedPage, error) {
 	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
 	if err != nil {
 		return nil, err
@@ -138,7 +211,7 @@ func (c *Client) GetCustomFeed(ctx context.Context, did, sessionID, feedURI, cur
 		return nil, fmt.Errorf("getFeed %q: %w", feedURI, err)
 	}
 
-	posts := mapFeedViewPosts(out.Feed)
+	posts := mapFeedViewPosts(out.Feed, mutedWords)
 
 	var nextCursor string
 	if out.Cursor != nil {

@@ -91,7 +91,7 @@ func TestMapFeedViewPosts_Dedup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mapFeedViewPosts(tt.items)
+			got := mapFeedViewPosts(tt.items, nil)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %d posts, want %d", len(got), len(tt.want))
 			}

@@ -13,17 +13,29 @@
     {{else if .Thread}}
     <ul class="post-list">
         {{range .Thread.Ancestors}}
-        <li class="post-card post-card-ancestor" data-post-uri="{{safeAtURI .URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
-            {{template "post-card-inner" .}}
+        {{if .Unavailable}}
+        <li class="post-card post-card-ancestor post-card-unavailable">
+            <p class="muted-text">Post unavailable{{if .Reason}} ({{.Reason}}){{end}}.</p>
         </li>
+        {{else}}
+        <li class="post-card post-card-ancestor" data-post-uri="{{safeAtURI .Post.URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
+            {{template "post-card-inner" .Post}}
+        </li>
+        {{end}}
         {{end}}
         <li class="post-card post-card-focal" data-post-uri="{{safeAtURI .Thread.Focal.URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
             {{template "post-card-inner" .Thread.Focal}}
         </li>
         {{range .Thread.Replies}}
-        <li class="post-card" data-post-uri="{{safeAtURI .URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
-            {{template "post-card-inner" .}}
+        {{if .Unavailable}}
+        <li class="post-card post-card-unavailable">
+            <p class="muted-text">Post unavailable{{if .Reason}} ({{.Reason}}){{end}}.</p>
         </li>
+        {{else}}
+        <li class="post-card" data-post-uri="{{safeAtURI .Post.URI}}" onclick="navigateToThread(event, this.dataset.postUri)" style="cursor:pointer">
+            {{template "post-card-inner" .Post}}
+        </li>
+        {{end}}
         {{end}}
     </ul>
     {{end}}

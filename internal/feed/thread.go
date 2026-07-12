@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
 )
@@ -14,17 +15,52 @@ var (
 	ErrThreadBlocked  = errors.New("thread: post blocked")
 )
 
+// ThreadEntry is one row in a thread's ancestor or reply list. Exactly one of Post or
+// Unavailable is meaningful: when Unavailable is true the post is hidden (blocked,
+// not-found, muted, or muted-word) and Post is nil — the template renders a labelled
+// "unavailable" gap instead of the post, so a hole in the thread reads as intentional
+// rather than as missing data. Reason is a short human label ("blocked", "muted", …).
+type ThreadEntry struct {
+	Post        *PostView
+	Unavailable bool
+	Reason      string
+}
+
 // ThreadView is the structured view of a post thread: ancestors in root-first
 // order, the focal post, and its direct replies in ascending indexedAt order.
 type ThreadView struct {
-	Ancestors []PostView
+	Ancestors []ThreadEntry
 	Focal     PostView
-	Replies   []PostView
+	Replies   []ThreadEntry
+}
+
+// threadEntryFor maps a single thread post to a ThreadEntry, honouring account-level
+// moderation (muted/blocked author → an "unavailable" gap) and muted words (→ a "muted"
+// gap). Returns a visible entry otherwise. now is the reference time for muted-word expiry.
+func threadEntryFor(post *appbsky.FeedDefs_PostView, mutedWords []MutedWord, now time.Time) ThreadEntry {
+	var authorViewer *appbsky.ActorDefs_ViewerState
+	if post.Author != nil {
+		authorViewer = post.Author.Viewer
+	}
+	if authorHidden(authorViewer) {
+		return ThreadEntry{Unavailable: true, Reason: "muted or blocked"}
+	}
+	pv := postViewFromBsky(post)
+	if postHiddenByMutedWords(mutedWords, pv, authorViewer, now) {
+		return ThreadEntry{Unavailable: true, Reason: "muted"}
+	}
+	return ThreadEntry{Post: &pv}
 }
 
 // GetThread fetches the thread rooted at or containing uri and returns a
 // ThreadView. Returns ErrThreadNotFound or ErrThreadBlocked for those cases.
-func (c *Client) GetThread(ctx context.Context, did, sessionID, uri string) (*ThreadView, error) {
+//
+// mutedWords filters ancestors and replies: a post from a muted/blocked account, or one
+// matching a muted word, renders as an "unavailable" gap rather than vanishing — a
+// truncated thread is confusing, a labelled gap is not. The focal post is always shown
+// (the user navigated to it deliberately); a wholly blocked focal still returns
+// ErrThreadBlocked, which the API surfaces server-side.
+func (c *Client) GetThread(ctx context.Context, did, sessionID, uri string, mutedWords []MutedWord) (*ThreadView, error) {
 	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
 	if err != nil {
 		return nil, err
@@ -50,15 +86,25 @@ func (c *Client) GetThread(ctx context.Context, did, sessionID, uri string) (*Th
 		return nil, ErrThreadNotFound
 	}
 
-	// Walk parent chain innermost-first, collect ancestor PostViews.
-	var ancestors []PostView
+	now := time.Now()
+
+	// Walk parent chain innermost-first, collecting ancestor entries. A blocked or
+	// not-found ancestor is a terminal node in the API response (it carries no parent
+	// pointer), so it becomes one labelled gap and stops the ascent. A muted ancestor is
+	// still a full ThreadViewPost, so it becomes a gap but the walk continues upward.
+	var ancestors []ThreadEntry
 	for cur := focal.Parent; cur != nil; {
 		if cur.FeedDefs_ThreadViewPost == nil {
-			break // not-found or blocked ancestor — stop ascending
+			reason := "unavailable"
+			if cur.FeedDefs_BlockedPost != nil {
+				reason = "blocked"
+			}
+			ancestors = append(ancestors, ThreadEntry{Unavailable: true, Reason: reason})
+			break // not-found or blocked ancestor — cannot ascend past it
 		}
 		tvp := cur.FeedDefs_ThreadViewPost
 		if tvp.Post != nil {
-			ancestors = append(ancestors, postViewFromBsky(tvp.Post))
+			ancestors = append(ancestors, threadEntryFor(tvp.Post, mutedWords, now))
 		}
 		cur = tvp.Parent
 	}
@@ -72,22 +118,49 @@ func (c *Client) GetThread(ctx context.Context, did, sessionID, uri string) (*Th
 		focalPV = postViewFromBsky(focal.Post)
 	}
 
-	var replies []PostView
+	// Direct replies: blocked/not-found reply elements and muted/muted-word replies each
+	// render as a labelled gap so the reply list doesn't silently lose rows.
+	type sortableReply struct {
+		entry     ThreadEntry
+		indexedAt string
+	}
+	var sortable []sortableReply
 	for _, r := range focal.Replies {
-		if r == nil || r.FeedDefs_ThreadViewPost == nil || r.FeedDefs_ThreadViewPost.Post == nil {
+		if r == nil {
 			continue
 		}
-		replies = append(replies, postViewFromBsky(r.FeedDefs_ThreadViewPost.Post))
+		if r.FeedDefs_ThreadViewPost != nil && r.FeedDefs_ThreadViewPost.Post != nil {
+			post := r.FeedDefs_ThreadViewPost.Post
+			sortable = append(sortable, sortableReply{
+				entry:     threadEntryFor(post, mutedWords, now),
+				indexedAt: post.IndexedAt,
+			})
+			continue
+		}
+		reason := "unavailable"
+		if r.FeedDefs_BlockedPost != nil {
+			reason = "blocked"
+		}
+		// Blocked/not-found replies have no indexedAt; sort them to the end.
+		sortable = append(sortable, sortableReply{
+			entry:     ThreadEntry{Unavailable: true, Reason: reason},
+			indexedAt: "",
+		})
 	}
-	sort.Slice(replies, func(i, j int) bool {
-		return replies[i].IndexedAt < replies[j].IndexedAt
+	sort.SliceStable(sortable, func(i, j int) bool {
+		// Entries without an indexedAt (blocked/not-found replies) sort to the end.
+		if (sortable[i].indexedAt == "") != (sortable[j].indexedAt == "") {
+			return sortable[i].indexedAt != ""
+		}
+		return sortable[i].indexedAt < sortable[j].indexedAt
 	})
+	replies := make([]ThreadEntry, 0, len(sortable))
+	for _, s := range sortable {
+		replies = append(replies, s.entry)
+	}
 
 	if ancestors == nil {
-		ancestors = []PostView{}
-	}
-	if replies == nil {
-		replies = []PostView{}
+		ancestors = []ThreadEntry{}
 	}
 
 	return &ThreadView{

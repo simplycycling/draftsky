@@ -152,7 +152,7 @@ func (c *Client) GetProfile(ctx context.Context, did, sessionID, actor string) (
 // The items are FeedViewPosts, so mapFeedViewPosts is reused wholesale — dedup,
 // embeds, and reply/repost context all come for free. cursor is the opaque
 // pagination cursor from the previous response; pass "" for the first page.
-func (c *Client) GetAuthorFeed(ctx context.Context, did, sessionID, actor, cursor string, limit int) (*FeedPage, error) {
+func (c *Client) GetAuthorFeed(ctx context.Context, did, sessionID, actor, cursor string, limit int, mutedWords []MutedWord) (*FeedPage, error) {
 	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
 	if err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func (c *Client) GetAuthorFeed(ctx context.Context, did, sessionID, actor, curso
 		return nil, fmt.Errorf("getAuthorFeed(%q): %w", actor, err)
 	}
 
-	posts := mapFeedViewPosts(out.Feed)
+	posts := mapFeedViewPosts(out.Feed, mutedWords)
 
 	var nextCursor string
 	if out.Cursor != nil {

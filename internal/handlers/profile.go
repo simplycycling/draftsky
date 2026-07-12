@@ -84,21 +84,24 @@ func (h *UIHandler) HandleProfilePage(c *gin.Context) {
 		return
 	}
 
+	// Build the chrome first so its single getPreferences call also supplies the muted
+	// words used to filter the author feed (no second getPreferences on this render).
+	data := ProfilePageData{
+		LayoutData: h.buildLayoutBase(c, did, sessionID, user),
+		Profile:    profile,
+		Actor:      actor,
+	}
+
 	// Author feed is non-fatal — a header with an empty feed still renders.
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if fetched, err := h.feedClient.GetAuthorFeed(
-		c.Request.Context(), did, sessionID, actor, "", uiFeedLimit,
+		c.Request.Context(), did, sessionID, actor, "", uiFeedLimit, data.MutedWords,
 	); err != nil {
 		slog.Error("GetAuthorFeed in profile handler", "actor", actor, "did", did, "err", err)
 	} else {
 		feedPage = fetched
 	}
 
-	data := ProfilePageData{
-		LayoutData: h.buildLayoutBase(c, did, sessionID, user),
-		Profile:    profile,
-		Actor:      actor,
-	}
 	data.FeedPage = feedPage
 	data.FeedType = "profile"
 	data.SentinelURL = profileFeedSentinelURL(actor, feedPage.NextCursor)
@@ -123,9 +126,10 @@ func (h *UIHandler) HandleProfileFeedPartial(c *gin.Context) {
 		return
 	}
 
+	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if fetched, err := h.feedClient.GetAuthorFeed(
-		c.Request.Context(), did, sessionID, actor, cursor, uiFeedLimit,
+		c.Request.Context(), did, sessionID, actor, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
 		slog.Error("GetAuthorFeed (partial)", "actor", actor, "did", did, "err", err)
 	} else {
@@ -196,7 +200,8 @@ func (h *ProfileHandler) HandleGetProfileFeed(c *gin.Context) {
 		return
 	}
 
-	page, err := h.client.GetAuthorFeed(c.Request.Context(), did, sessionID, actor, cursor, limit)
+	mutedWords := fetchMutedWords(c.Request.Context(), h.client, did, sessionID)
+	page, err := h.client.GetAuthorFeed(c.Request.Context(), did, sessionID, actor, cursor, limit, mutedWords)
 	if err != nil {
 		slog.Error("GetAuthorFeed (JSON) failed", "actor", actor, "did", did, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch author feed"})

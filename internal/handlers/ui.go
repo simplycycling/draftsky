@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -73,6 +74,12 @@ type LayoutData struct {
 	RecentTags  []string
 	SavedFeeds  []feed.SavedFeed // pinned feeds for the tab bar; nil = no tabs
 	UnreadCount int64            // unread notification count for the left-rail badge; 0 hides it
+	// MutedWords is fetched alongside SavedFeeds in the single per-render getPreferences
+	// call (buildLayoutBase → GetPreferences). Not rendered; carried so the same handler
+	// can pass it to the feed fetch (Following on home, thread posts) without a second
+	// getPreferences. Feed-partial handlers, which don't build the full layout, fetch
+	// muted words on their own via mutedWordsFor.
+	MutedWords []feed.MutedWord
 	// Feed state
 	FeedPage      *feed.FeedPage
 	FeedType      string   // "following" | "hashtag" | "custom"
@@ -447,17 +454,20 @@ func (h *UIHandler) HandleHome(c *gin.Context) {
 		return
 	}
 
+	// Build the chrome first: its single getPreferences call also yields the muted words
+	// the Following feed is then filtered with (no second getPreferences on this render).
+	data := h.buildLayoutBase(c, did, sessionID, user)
+
 	// Fetch first page of Following feed — non-fatal if unavailable.
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if fetchedPage, err := h.feedClient.GetFollowingFeed(
-		c.Request.Context(), did, sessionID, "", uiFeedLimit,
+		c.Request.Context(), did, sessionID, "", uiFeedLimit, data.MutedWords,
 	); err != nil {
 		slog.Error("GetFollowingFeed in home handler", "did", did, "err", err)
 	} else {
 		feedPage = fetchedPage
 	}
 
-	data := h.buildLayoutBase(c, did, sessionID, user)
 	data.FeedPage = feedPage
 	data.FeedType = "following"
 	data.SentinelURL = followingSentinelURL(feedPage.NextCursor)
@@ -476,9 +486,10 @@ func (h *UIHandler) HandleFollowingFeedPartial(c *gin.Context) {
 	sessionID := c.GetString(middleware.ContextKeySessionID)
 	cursor := c.Query("cursor")
 
+	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if fetchedPage, err := h.feedClient.GetFollowingFeed(
-		c.Request.Context(), did, sessionID, cursor, uiFeedLimit,
+		c.Request.Context(), did, sessionID, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
 		slog.Error("GetFollowingFeed (partial)", "did", did, "err", err)
 	} else {
@@ -528,10 +539,11 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 		return
 	}
 
+	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if len(tags) > 0 {
 		if fetchedPage, err := h.feedClient.GetHashtagFeed(
-			c.Request.Context(), did, sessionID, tags, author, cursor, uiFeedLimit,
+			c.Request.Context(), did, sessionID, tags, author, cursor, uiFeedLimit, mutedWords,
 		); err != nil {
 			slog.Error("GetHashtagFeed (partial)", "did", did, "tags", tags, "author", author, "err", err)
 		} else {
@@ -571,9 +583,10 @@ func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
 		return
 	}
 
+	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if fetchedPage, err := h.feedClient.GetCustomFeed(
-		c.Request.Context(), did, sessionID, feedURI, cursor, uiFeedLimit,
+		c.Request.Context(), did, sessionID, feedURI, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
 		slog.Error("GetCustomFeed (partial)", "did", did, "uri", feedURI, "err", err)
 	} else {
@@ -651,6 +664,7 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 	var (
 		wg          sync.WaitGroup
 		savedFeeds  []feed.SavedFeed
+		mutedWords  []feed.MutedWord
 		unreadCount int64
 	)
 	ctx := c.Request.Context()
@@ -658,12 +672,18 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		feeds, err := h.feedClient.GetSavedFeeds(ctx, did, sessionID)
+		// One getPreferences call serves both the saved-feeds tab bar and muted-word
+		// filtering for any feed this render also fetches (Following on home, thread
+		// posts). On failure, degrade to a Following-only tab bar and no muted-word
+		// filtering — neither breaks the page.
+		prefs, err := h.feedClient.GetPreferences(ctx, did, sessionID)
 		if err != nil {
-			slog.Warn("GetSavedFeeds failed, using following-only tab bar", "did", did, "err", err)
-			feeds = []feed.SavedFeed{{DisplayName: "Following", IsTimeline: true}}
+			slog.Warn("GetPreferences failed, using following-only tab bar and no muted-word filter", "did", did, "err", err)
+			savedFeeds = []feed.SavedFeed{{DisplayName: "Following", IsTimeline: true}}
+			return
 		}
-		savedFeeds = feeds
+		savedFeeds = prefs.SavedFeeds
+		mutedWords = prefs.MutedWords
 	}()
 	go func() {
 		defer wg.Done()
@@ -687,8 +707,27 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 		CSRFToken:   auth.CSRFToken(sessionID, h.secret),
 		RecentTags:  recentTags,
 		SavedFeeds:  savedFeeds,
+		MutedWords:  mutedWords,
 		UnreadCount: unreadCount,
 	}
+}
+
+// fetchMutedWords fetches the user's muted words for feed content filtering, degrading to
+// nil (no filtering) on any error — muting must never break a feed fetch. Shared by the
+// UI-partial, profile, and JSON API handlers, which don't build the full layout (and so
+// have no MutedWords cached from buildLayoutBase's single getPreferences call).
+func fetchMutedWords(ctx context.Context, client *feed.Client, did, sessionID string) []feed.MutedWord {
+	words, err := client.GetMutedWords(ctx, did, sessionID)
+	if err != nil {
+		slog.Warn("GetMutedWords failed; feed rendered unfiltered", "did", did, "err", err)
+		return nil
+	}
+	return words
+}
+
+// mutedWordsFor is the UIHandler-scoped convenience wrapper around fetchMutedWords.
+func (h *UIHandler) mutedWordsFor(ctx context.Context, did, sessionID string) []feed.MutedWord {
+	return fetchMutedWords(ctx, h.feedClient, did, sessionID)
 }
 
 // HandleTemplatesPage renders the template management page.
@@ -935,7 +974,7 @@ func (h *UIHandler) HandleThreadPage(c *gin.Context) {
 		return
 	}
 
-	threadView, err := h.feedClient.GetThread(c.Request.Context(), did, sessionID, uri)
+	threadView, err := h.feedClient.GetThread(c.Request.Context(), did, sessionID, uri, data.MutedWords)
 	if err != nil {
 		switch {
 		case errors.Is(err, feed.ErrThreadNotFound):

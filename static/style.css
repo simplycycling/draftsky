@@ -395,6 +395,18 @@ button {
     background: var(--color-surface);
 }
 
+/* A muted/blocked/unavailable post in a thread: a labelled gap, not a card body.
+   Non-interactive (no cursor, no hover lift) so it reads as an intentional hole. */
+.post-card-unavailable {
+    font-style: italic;
+    background: transparent;
+    cursor: default;
+}
+
+.post-card-unavailable:hover {
+    background: transparent;
+}
+
 .post-header {
     display: flex;
     align-items: flex-start;

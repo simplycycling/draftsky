@@ -419,6 +419,29 @@ Append-only list — check the current highest number before adding.
     on the interactive children's `stopPropagation` to keep them out of it, not on a
     blocklist. (Verified with a byte-identical-function DOM harness — this is a
     synchronous selector bug, so a real click, not a code-walk, is what proves it.)
+21. **Moderation viewer flags live on the AUTHOR's viewer state, not the post's.**
+    `FeedDefs_ViewerState` (a post's `pv.Viewer`) carries only `like`/`repost`/`bookmarked`/
+    `threadMuted`/`pinned` — NOT muted/blocked. The moderation flags (`Muted`, `MutedByList`,
+    `BlockedBy`, `Blocking`, `BlockingByList`, and `Following` for exclude-following) are on
+    `ActorDefs_ViewerState`, reached via `pv.Author.Viewer`. The reposter carries its own copy
+    at `item.Reason.FeedDefs_ReasonRepost.By.Viewer` (`By` is a full ProfileViewBasic), so a
+    repost by a muted account can be dropped without an extra fetch. Reaching for
+    `post.Viewer.Muted` compiles to nothing useful — it isn't there. Feed-side moderation
+    (roadmap item 9) filters at the single `mapFeedViewPosts` chokepoint using the author/
+    reposter `ActorDefs_ViewerState`; muted words come from `getPreferences`' `mutedWordsPref`.
+22. **searchPosts moderation — VERIFIED no-leak against a live block (2026-07-12).** The open
+    worry was that `searchPosts` (the merged hashtag feed) might not server-filter blocks the
+    way getTimeline/getFeed do, and might also omit `Author.Viewer`, letting blocked authors
+    leak. `GetHashtagFeed` re-applies `authorHidden` + muted-words defensively. Live check with
+    a real blocked account (posts #EVZ daily): DraftSky's `#EVZ` hashtag feed contained ZERO of
+    their posts — the newest result was 6 months stale despite them posting #EVZ the prior day
+    (offseason, ~sole #EVZ poster), i.e. their recent posts were dropped. Blocked accounts do
+    NOT leak. Could not isolate server-prefilter vs our `authorHidden` from the client, but the
+    outcome is correct and `authorHidden` is unit-tested. Also confirmed live: a blocked account
+    as a thread ancestor renders the "Post unavailable (blocked)" gap; `getAuthorFeed` for a
+    blocked account errors upstream (server-enforced) and degrades to an empty feed. Muted-WORD
+    filtering was likewise verified (a muted tag emptied its feed while a control tag stayed
+    full, and exact-tag precision held: muting `bluejays` did not hide `#TorontoBlueJays`).
 
 ---
 
@@ -474,6 +497,15 @@ in Docker (`docker start draftsky-dev-db`).
   gate (no per-request SELECT); owner-only `GET /admin/stats` (RequireAdmin 404s every
   non-owner/no-session case to hide the route) rendering DAU/WAU/MAU + user/content
   totals from two single-pass aggregate queries
+- Bluesky mutes + blocks inheritance (contained) — feed content the user muted/blocked on
+  Bluesky no longer shows in DraftSky. Account-level drops (muted incl. lists, blockedBy,
+  blocking) + muted-word/tag filtering (mutedWordsPref) at the `mapFeedViewPosts` chokepoint,
+  the hashtag-feed merge loop, and thread view (muted/blocked ancestors/replies → labelled
+  "unavailable" gaps). One getPreferences per render serves both saved feeds and muted words.
+  Pure-function filtering with table tests (author flags, muted-word matching incl. whole-word
+  `cat`≠`catalogue`, expiry, exclude-following) + a thread-gap render smoke test. Live-verified
+  2026-07-12 against a real muted tag and a real blocked account (hashtag feed no-leak + thread
+  gap + getAuthorFeed upstream-error). See Gotchas 21–22
 - Static asset cache-busting — content-hash `?v=<sha8>` on app.js/style.css (+ hls.min.js
   via a `<meta>` tag app.js reads), computed once at startup from file bytes; `/static`
   now served `Cache-Control: public, max-age=31536000, immutable`. Ends the Gotcha 10
@@ -531,20 +563,25 @@ in Docker (`docker start draftsky-dev-db`).
    `GET /admin/stats` (RequireAdmin, self-validating → 404 for any non-owner/no-session
    so the route stays hidden) renders the layout with two single-pass aggregate queries
    (GetAdminStats FILTER windows + GetContentStats). Email push remains a post-GA upgrade.
-9. **Inherit Bluesky mutes + blocks (contained version)** — DraftSky currently shows
-   content the user's Bluesky account has muted or blocked. Pre-GA scope, all at the
-   `mapFeedViewPosts` chokepoint every feed flows through:
-   (a) honour the `muted` and `blockedBy`/blocking viewer flags on posts — drop them
-   from feed pages (v1 drops rather than collapse-with-reveal);
-   (b) muted words/tags from `getPreferences` (`mutedWordsPref` — same call saved
-   feeds already use; cache per page render) matched client-side against post text
-   and hashtags, per its targets/actorTarget rules as documented in the lexicon;
-   (c) verify the merged hashtag feed (searchPosts) — blocks may NOT be server-filtered
-   there the way getTimeline/getFeed are; if so the flag-honouring in (a) covers it,
-   confirm with a real blocked account.
-   FULL parity (collapse-with-"show anyway" UI, muted-thread handling, profile-page
-   interstitials for blocked accounts, mute expiry times) is post-GA polish — filed
-   below.
+9. **Inherit Bluesky mutes + blocks (contained version)** — ✅ **DONE** (see Shipped).
+   Filtering converges on `mapFeedViewPosts` (following/custom/author feeds) plus the
+   `GetHashtagFeed` merge loop and `GetThread`. (a) `authorHidden` drops posts whose
+   author — or, for a repost, the reposter (its own viewer state on `Reason.By`) — is
+   muted (incl. mute lists) or block-related, reading `pv.Author.Viewer`
+   (`ActorDefs_ViewerState`, NOT the post's viewer state — see Gotcha 21). (b) Muted
+   words/tags come from `getPreferences`' `mutedWordsPref` via a single per-render call
+   (`GetPreferences` returns saved feeds + muted words together; muted-words-only
+   consumers use `GetMutedWords`, no getFeedGenerators round-trip); `matchesMutedWords`
+   does whole-word content matching (`cat` ≠ `catalogue`), phrase substring, tag matching,
+   expiry, and `exclude-following` via `Author.Viewer.Following`. (c) searchPosts is
+   re-filtered client-side because its server-side block filtering is unverified — see
+   Gotcha 22 (needs one live run against a blocked account). Thread ancestors/replies that
+   are muted/blocked render as labelled "unavailable" gaps (`ThreadEntry`) rather than
+   vanishing. Documented simplifications: no diacritic-stripping/URL-special-casing in
+   content matching; tag matching uses inline hashtags (not the record's non-inline `tags`
+   field); a muted account's own profile feed filters to empty (the post-GA interstitial
+   addresses that). FULL parity (collapse-with-"show anyway" UI, muted-thread handling,
+   profile-page interstitials, mute expiry display) is post-GA polish — filed below.
 
 After item 9: **GA**.
 

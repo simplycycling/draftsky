@@ -6,10 +6,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
-	"github.com/bluesky-social/indigo/atproto/auth/oauth"
 	"github.com/bluesky-social/indigo/atproto/atclient"
+	"github.com/bluesky-social/indigo/atproto/auth/oauth"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 )
 
@@ -38,7 +39,7 @@ type PostExternalLink struct {
 
 // PostVideo is an HLS video attached to a post (app.bsky.embed.video#view).
 type PostVideo struct {
-	Playlist    string  `json:"playlist"`     // HLS .m3u8 URL
+	Playlist    string  `json:"playlist"` // HLS .m3u8 URL
 	Thumbnail   string  `json:"thumbnail,omitempty"`
 	Alt         string  `json:"alt,omitempty"`
 	AspectRatio float64 `json:"aspect_ratio,omitempty"` // width/height; 0 if unknown
@@ -62,14 +63,14 @@ type QuotedPost struct {
 // PostView is the clean JSON representation of a single post in a feed.
 // No indigo types leak out of this struct.
 type PostView struct {
-	URI         string      `json:"uri"`
-	CID         string      `json:"cid"`
-	Author      PostAuthor  `json:"author"`
-	Text        string      `json:"text"`
-	IndexedAt   string      `json:"indexed_at"`
-	LikeCount   int64       `json:"like_count"`
-	RepostCount int64       `json:"repost_count"`
-	ReplyCount  int64       `json:"reply_count"`
+	URI          string            `json:"uri"`
+	CID          string            `json:"cid"`
+	Author       PostAuthor        `json:"author"`
+	Text         string            `json:"text"`
+	IndexedAt    string            `json:"indexed_at"`
+	LikeCount    int64             `json:"like_count"`
+	RepostCount  int64             `json:"repost_count"`
+	ReplyCount   int64             `json:"reply_count"`
 	LikedByMe    bool              `json:"liked_by_me"`
 	LikeURI      string            `json:"like_uri,omitempty"`
 	RepostedByMe bool              `json:"reposted_by_me"`
@@ -124,8 +125,15 @@ func (c *Client) resumeAPIClient(ctx context.Context, did, sessionID string) (*a
 
 // mapFeedViewPosts converts a slice of FeedViewPost items to PostViews,
 // extracting repost attribution and reply context where available.
-// Used by GetFollowingFeed and GetCustomFeed.
-func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost) []PostView {
+// Used by GetFollowingFeed, GetCustomFeed, and GetAuthorFeed.
+//
+// mutedWords, when non-empty, drops posts whose text/hashtags match an active muted word
+// (app.bsky.actor.defs#mutedWord). Independently, posts whose author (or, for a repost, the
+// reposter) is muted or block-related — see authorHidden — are dropped regardless of muted
+// words. This is the single chokepoint every getTimeline/getFeed/getAuthorFeed page flows
+// through, so all of them inherit the same moderation filtering (roadmap item 9).
+func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost, mutedWords []MutedWord) []PostView {
+	now := time.Now()
 	posts := make([]PostView, 0, len(items))
 	// seen tracks dedup keys already emitted in this page. The key is the post URI
 	// plus the reposter DID (empty when the item is not a repost), so a post that
@@ -136,9 +144,21 @@ func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost) []PostView {
 		if item == nil || item.Post == nil {
 			continue
 		}
+		// Account-level moderation: drop posts whose author the viewer has muted or is
+		// block-related to. The post's author carries the moderation viewer flags.
+		if item.Post.Author != nil && authorHidden(item.Post.Author.Viewer) {
+			continue
+		}
 		var reposterDID string
+		var reposter *appbsky.ActorDefs_ProfileViewBasic
 		if item.Reason != nil && item.Reason.FeedDefs_ReasonRepost != nil && item.Reason.FeedDefs_ReasonRepost.By != nil {
-			reposterDID = item.Reason.FeedDefs_ReasonRepost.By.Did
+			reposter = item.Reason.FeedDefs_ReasonRepost.By
+			reposterDID = reposter.Did
+		}
+		// A repost by a muted/blocked account is dropped even when the underlying post's
+		// author is fine — the reposter carries its own viewer state on the reason's By.
+		if reposter != nil && authorHidden(reposter.Viewer) {
+			continue
 		}
 		key := item.Post.Uri + "\x00" + reposterDID
 		if _, dup := seen[key]; dup {
@@ -147,6 +167,16 @@ func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost) []PostView {
 		seen[key] = struct{}{}
 
 		pv := postViewFromBsky(item.Post)
+		// Muted-word filtering (content + tag targets, expiry, exclude-following).
+		if len(mutedWords) > 0 {
+			var authorViewer *appbsky.ActorDefs_ViewerState
+			if item.Post.Author != nil {
+				authorViewer = item.Post.Author.Viewer
+			}
+			if postHiddenByMutedWords(mutedWords, pv, authorViewer, now) {
+				continue
+			}
+		}
 		if item.Reason != nil && item.Reason.FeedDefs_ReasonRepost != nil {
 			r := item.Reason.FeedDefs_ReasonRepost
 			if r.By != nil {
@@ -183,7 +213,7 @@ func mapFeedViewPosts(items []*appbsky.FeedDefs_FeedViewPost) []PostView {
 // GetFollowingFeed returns a page of the authenticated user's Following feed,
 // using app.bsky.feed.getTimeline. The cursor is the opaque string returned
 // in the previous response; pass an empty string for the first page.
-func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor string, limit int) (*FeedPage, error) {
+func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor string, limit int, mutedWords []MutedWord) (*FeedPage, error) {
 	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
 	if err != nil {
 		return nil, err
@@ -194,7 +224,7 @@ func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor st
 		return nil, fmt.Errorf("getTimeline: %w", err)
 	}
 
-	posts := mapFeedViewPosts(out.Feed)
+	posts := mapFeedViewPosts(out.Feed, mutedWords)
 
 	var nextCursor string
 	if out.Cursor != nil {
@@ -214,7 +244,7 @@ func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor st
 // resolves handles to DID server-side. This backs the "See #tag posts by @handle" menu
 // option. Empty author means the ordinary merged hashtag feed. The caller must validate
 // author (handle/DID form) before calling.
-func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags []string, author, cursor string, limit int) (*FeedPage, error) {
+func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags []string, author, cursor string, limit int, mutedWords []MutedWord) (*FeedPage, error) {
 	if len(tags) == 0 {
 		return &FeedPage{Posts: []PostView{}}, nil
 	}
@@ -246,18 +276,18 @@ func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags
 			// merge a large pool before applying the caller's limit.
 			out, err := appbsky.FeedSearchPosts(
 				ctx, apiClient,
-				author,        // author (empty = no author filter)
-				"",            // cursor (we do our own cursor logic after merging)
-				"",            // domain
-				"",            // lang
-				100,           // limit per-tag — maximise merge pool
-				"",            // mentions
-				"#"+tagName,   // q
-				"",            // since
-				"latest",      // sort
+				author,            // author (empty = no author filter)
+				"",                // cursor (we do our own cursor logic after merging)
+				"",                // domain
+				"",                // lang
+				100,               // limit per-tag — maximise merge pool
+				"",                // mentions
+				"#"+tagName,       // q
+				"",                // since
+				"latest",          // sort
 				[]string{tagName}, // tag (facet filter)
-				"",            // until
-				"",            // url
+				"",                // until
+				"",                // url
 			)
 			if err != nil {
 				results <- searchResult{err: fmt.Errorf("searchPosts(%q): %w", tagName, err)}
@@ -270,7 +300,11 @@ func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags
 	wg.Wait()
 	close(results)
 
-	// Merge and deduplicate by URI.
+	// Merge and deduplicate by URI, applying the same moderation filtering as the
+	// timeline. searchPosts is NOT reliably server-filtered for blocks the way
+	// getTimeline/getFeed are (roadmap item 9c), so honouring the author viewer flags
+	// and muted words here is what keeps muted/blocked content out of the hashtag feed.
+	now := time.Now()
 	seen := make(map[string]struct{})
 	var all []PostView
 	for r := range results {
@@ -285,7 +319,19 @@ func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags
 				continue
 			}
 			seen[p.Uri] = struct{}{}
-			all = append(all, postViewFromBsky(p))
+			// Account-level: drop posts by a muted/blocked author.
+			var authorViewer *appbsky.ActorDefs_ViewerState
+			if p.Author != nil {
+				authorViewer = p.Author.Viewer
+			}
+			if authorHidden(authorViewer) {
+				continue
+			}
+			pv := postViewFromBsky(p)
+			if len(mutedWords) > 0 && postHiddenByMutedWords(mutedWords, pv, authorViewer, now) {
+				continue
+			}
+			all = append(all, pv)
 		}
 	}
 

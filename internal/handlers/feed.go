@@ -55,7 +55,8 @@ func (h *FeedHandler) HandleGetFollowingFeed(c *gin.Context) {
 	cursor := c.Query("cursor")
 	limit := parseLimit(c)
 
-	page, err := h.client.GetFollowingFeed(c.Request.Context(), did, sessionID, cursor, limit)
+	mutedWords := fetchMutedWords(c.Request.Context(), h.client, did, sessionID)
+	page, err := h.client.GetFollowingFeed(c.Request.Context(), did, sessionID, cursor, limit, mutedWords)
 	if err != nil {
 		slog.Error("GetFollowingFeed failed", "did", did, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch following feed"})
@@ -107,7 +108,8 @@ func (h *FeedHandler) HandleGetHashtagFeed(c *gin.Context) {
 		return
 	}
 
-	page, err := h.client.GetHashtagFeed(c.Request.Context(), did, sessionID, tags, author, cursor, limit)
+	mutedWords := fetchMutedWords(c.Request.Context(), h.client, did, sessionID)
+	page, err := h.client.GetHashtagFeed(c.Request.Context(), did, sessionID, tags, author, cursor, limit, mutedWords)
 	if err != nil {
 		slog.Error("GetHashtagFeed failed", "did", did, "tags", tags, "author", author, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch hashtag feed"})
