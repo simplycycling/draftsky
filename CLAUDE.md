@@ -423,6 +423,10 @@ in Docker (`docker start draftsky-dev-db`).
   were silently invisible in production)
 - @-mentions: outgoing mention facets (concurrent handle resolution, suffix mentions,
   emails excluded), incoming mentions accent-rendered in feeds
+- Hashtag context menu — Bluesky-style popover on hashtag click: "See #tag posts" +
+  "See #tag posts by @author" (searchPosts author+tag filter, `?author=` on
+  /feed/hashtags; validated handle/DID → 400). Reuses the repost-menu pattern; bios
+  show one option (no post author); right-rail tags keep direct-switch (your own tags)
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
@@ -448,11 +452,12 @@ in Docker (`docker start draftsky-dev-db`).
 5. **Mention typeahead** — composer: typing `@` + chars triggers a debounced
    searchActorsTypeahead dropdown; keyboard navigation (up/down/enter/escape),
    insert-on-select. Works in both new-post and reply/quote modes.
-6. **Hashtag context menu** — Bluesky-style popover on hashtag click: "See #tag posts"
-   (existing hashtag feed) and "See #tag posts by user" (author feed filtered — check
-   whether searchPosts supports author+tag; if not, defer this half too and note it).
-   "Mute #tag" is explicitly DEFERRED post-GA (needs a mutes table + filtering on
-   every feed path).
+6. **Hashtag context menu** — ✅ **DONE** (see Shipped). Bluesky-style popover on
+   hashtag click: "See #tag posts" (existing hashtag feed) and "See #tag posts by
+   @author". The searchPosts author+tag question resolved YES — our vendored indigo's
+   `FeedSearchPosts` has an `author` param (handle or DID, resolved server-side) that
+   combines with `tag`, so the by-author half shipped (no deferral). "Mute #tag"
+   remains DEFERRED post-GA (needs a mutes table + filtering on every feed path).
 7. **Quoted-card click-through diagnosis + fix** — observed dead on a post with an
    external link (GIF) above a quoted card containing a video thumbnail: clicking the
    quoted card did not navigate to the quoted thread. Click-through was built and

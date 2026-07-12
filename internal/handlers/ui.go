@@ -74,6 +74,7 @@ type LayoutData struct {
 	FeedPage      *feed.FeedPage
 	FeedType      string   // "following" | "hashtag" | "custom"
 	FeedTags      []string // active hashtag tags (for display + next-page URL)
+	FeedAuthor    string   // when set on a hashtag feed: "#tag by @author" (handle or DID)
 	FeedCustomURI string   // AT URI of the active custom feed (FeedType=="custom")
 	SentinelURL   string   // next-page URL embedded in the scroll sentinel
 }
@@ -136,16 +137,22 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		// tells html/template not to apply a second round of escaping.
 		//
 		// Hashtag spans get an onclick that stops propagation (so the card-level
-		// navigateToThread never fires) and switches the feed via
-		// switchToHashtagFeed; JSEscapeString guards the tag name inside the JS
-		// string literal. Mention spans work the same way: onclick stops
-		// propagation and calls navigateToProfile(event, '<handle>'), sending the
-		// user to /profile/<handle>. The handle (token minus the leading '@') goes
-		// through JSEscapeString for the JS string literal — it is already
-		// regex-validated domain-form text from uiMentionRe, but is escaped anyway
-		// as defence in depth (never trust display text). A handle that no longer
-		// resolves simply 404s at /profile, which is acceptable.
-		"highlightFacets": func(text string) template.HTML {
+		// navigateToThread never fires) and opens the hashtag context menu via
+		// openHashtagMenu(event, '<tag>', '<authorHandle>'). The menu offers
+		// "See #tag posts" (the ordinary merged hashtag feed) and, when authorHandle
+		// is non-empty, "See #tag posts by @author" (searchPosts author filter). The
+		// authorHandle is the handle of the post the hashtag belongs to — threaded in
+		// as a second argument. It is empty in author-less contexts (e.g. profile
+		// bios), where the menu shows a single option. JSEscapeString guards both the
+		// tag and the handle inside their JS string literals. Mention spans work the
+		// same way: onclick stops propagation and calls navigateToProfile(event,
+		// '<handle>'), sending the user to /profile/<handle>. The mention handle
+		// (token minus the leading '@') goes through JSEscapeString for the JS string
+		// literal — it is already regex-validated domain-form text from uiMentionRe,
+		// but is escaped anyway as defence in depth (never trust display text). A
+		// handle that no longer resolves simply 404s at /profile, which is acceptable.
+		"highlightFacets": func(text, authorHandle string) template.HTML {
+			jsAuthor := template.JSEscapeString(authorHandle)
 			type span struct {
 				start, end int
 				mention    bool
@@ -178,9 +185,11 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 					buf.WriteString(`</span>`)
 				} else {
 					tag := template.JSEscapeString(token[1:]) // strip '#', JS-escape
-					buf.WriteString(`<span class="post-hashtag" onclick="event.stopPropagation();switchToHashtagFeed(['`)
+					buf.WriteString(`<span class="post-hashtag" onclick="event.stopPropagation();openHashtagMenu(event,'`)
 					buf.WriteString(tag)
-					buf.WriteString(`'])">`)
+					buf.WriteString(`','`)
+					buf.WriteString(jsAuthor)
+					buf.WriteString(`')">`)
 					buf.WriteString(template.HTMLEscapeString(token))
 					buf.WriteString(`</span>`)
 				}
@@ -447,12 +456,21 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 		}
 	}
 
+	// author is optional (the "See #tag posts by @handle" menu option). Reject a
+	// malformed author outright rather than silently ignoring it — same guard as the
+	// profile routes.
+	author := strings.TrimSpace(c.Query("author"))
+	if author != "" && !isValidActor(author) {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
 	if len(tags) > 0 {
 		if fetchedPage, err := h.feedClient.GetHashtagFeed(
-			c.Request.Context(), did, sessionID, tags, cursor, uiFeedLimit,
+			c.Request.Context(), did, sessionID, tags, author, cursor, uiFeedLimit,
 		); err != nil {
-			slog.Error("GetHashtagFeed (partial)", "did", did, "tags", tags, "err", err)
+			slog.Error("GetHashtagFeed (partial)", "did", did, "tags", tags, "author", author, "err", err)
 		} else {
 			feedPage = fetchedPage
 		}
@@ -462,7 +480,8 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 		FeedPage:    feedPage,
 		FeedType:    "hashtag",
 		FeedTags:    tags,
-		SentinelURL: hashtagSentinelURL(tags, feedPage.NextCursor),
+		FeedAuthor:  author,
+		SentinelURL: hashtagSentinelURL(tags, author, feedPage.NextCursor),
 	}
 
 	tmplName := "feed"
@@ -916,11 +935,15 @@ func followingSentinelURL(nextCursor string) string {
 	return "/feed/following?cursor=" + url.QueryEscape(nextCursor)
 }
 
-func hashtagSentinelURL(tags []string, nextCursor string) string {
+func hashtagSentinelURL(tags []string, author, nextCursor string) string {
 	if nextCursor == "" || len(tags) == 0 {
 		return ""
 	}
-	return "/feed/hashtags?tags=" + strings.Join(tags, ",") + "&cursor=" + url.QueryEscape(nextCursor)
+	u := "/feed/hashtags?tags=" + strings.Join(tags, ",")
+	if author != "" {
+		u += "&author=" + url.QueryEscape(author)
+	}
+	return u + "&cursor=" + url.QueryEscape(nextCursor)
 }
 
 func customFeedSentinelURL(feedURI, nextCursor string) string {

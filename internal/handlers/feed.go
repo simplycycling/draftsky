@@ -70,6 +70,7 @@ func (h *FeedHandler) HandleGetFollowingFeed(c *gin.Context) {
 //
 // Query params:
 //   - tags    (string, required)  — comma-separated list of hashtags (with or without leading #)
+//   - author  (string, optional)  — handle or DID; filters to posts by that account
 //   - cursor  (string, optional)  — indexedAt timestamp; only posts strictly before this are returned
 //   - limit   (int, optional)     — page size, default 50, max 100
 func (h *FeedHandler) HandleGetHashtagFeed(c *gin.Context) {
@@ -77,6 +78,14 @@ func (h *FeedHandler) HandleGetHashtagFeed(c *gin.Context) {
 	sessionID := c.GetString(middleware.ContextKeySessionID)
 	cursor := c.Query("cursor")
 	limit := parseLimit(c)
+
+	// author is optional; when present it must be a syntactically valid handle or DID
+	// (same guard as the profile routes) before we hand it to searchPosts.
+	author := strings.TrimSpace(c.Query("author"))
+	if author != "" && !isValidActor(author) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "author must be a valid handle or DID"})
+		return
+	}
 
 	rawTags := c.Query("tags")
 	if rawTags == "" {
@@ -98,9 +107,9 @@ func (h *FeedHandler) HandleGetHashtagFeed(c *gin.Context) {
 		return
 	}
 
-	page, err := h.client.GetHashtagFeed(c.Request.Context(), did, sessionID, tags, cursor, limit)
+	page, err := h.client.GetHashtagFeed(c.Request.Context(), did, sessionID, tags, author, cursor, limit)
 	if err != nil {
-		slog.Error("GetHashtagFeed failed", "did", did, "tags", tags, "err", err)
+		slog.Error("GetHashtagFeed failed", "did", did, "tags", tags, "author", author, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch hashtag feed"})
 		return
 	}

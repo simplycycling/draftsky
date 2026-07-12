@@ -5,6 +5,7 @@
         <span class="feed-label">
             Hashtag Feed:
             {{range .FeedTags}}<span class="feed-active-tag">#{{.}}</span> {{end}}
+            {{if .FeedAuthor}}by <span class="feed-active-author">@{{.FeedAuthor}}</span>{{end}}
         </span>
         <button class="btn-back"
                 onclick="switchFeedTab(document.querySelector('.feed-tab[data-timeline]'), '/feed/following')">Back to Following</button>

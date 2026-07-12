@@ -69,7 +69,7 @@
         <span class="post-timestamp">{{relativeTime .IndexedAt}}</span>
     </div>
     <div class="post-body">
-        <p class="post-text">{{highlightFacets .Text}}</p>
+        <p class="post-text">{{highlightFacets .Text .Author.Handle}}</p>
         {{if .Images}}
         <div class="post-images">
             {{range .Images}}

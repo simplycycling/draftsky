@@ -351,7 +351,8 @@ button {
     flex-wrap: wrap;
 }
 
-.feed-active-tag {
+.feed-active-tag,
+.feed-active-author {
     color: var(--color-accent);
 }
 
@@ -1057,7 +1058,8 @@ button {
 }
 
 /* Repost/Quote popover — an absolutely-positioned menu anchored to the repost count. */
-.repost-menu {
+.repost-menu,
+.hashtag-menu {
     position: absolute;
     z-index: 1000;
     min-width: 140px;
@@ -1070,7 +1072,8 @@ button {
     flex-direction: column;
 }
 
-.repost-menu-item {
+.repost-menu-item,
+.hashtag-menu-item {
     display: block;
     width: 100%;
     padding: 8px 12px;
@@ -1080,10 +1083,12 @@ button {
     color: var(--color-text);
     font-size: 0.9rem;
     text-align: left;
+    white-space: nowrap;
     cursor: pointer;
 }
 
-.repost-menu-item:hover {
+.repost-menu-item:hover,
+.hashtag-menu-item:hover {
     background: var(--color-surface);
     color: var(--color-accent);
 }

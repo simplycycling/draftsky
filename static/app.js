@@ -567,6 +567,7 @@ function closeMentionDropdown() {
 // both are somehow open (it never is — the menu closes before the composer opens).
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+        if (_hashtagMenu) { closeHashtagMenu(); return; }
         if (_repostMenu) { closeRepostMenu(); return; }
         const overlay = document.getElementById('composer-overlay');
         if (overlay && overlay.style.display !== 'none') closeComposer();
@@ -1117,6 +1118,106 @@ function switchToHashtagFeed(tags) {
     activateTab(null); // hashtag feed has no pinned tab
     currentFeedURL = '/feed/hashtags?tags=' + tags.map(encodeURIComponent).join(',');
     htmx.ajax('GET', currentFeedURL, { target: '#feed-root', swap: 'innerHTML' });
+}
+
+// switchToHashtagFeedByAuthor loads the "#tag posts by @author" feed — the same
+// hashtag route with an author filter (searchPosts resolves the handle to a DID
+// server-side). The server validates author and renders the "by @author" controls
+// label; the existing Back button returns to Following unchanged.
+function switchToHashtagFeedByAuthor(tag, author) {
+    if (!tag) return;
+    if (!author) { switchToHashtagFeed([tag]); return; }
+    activateTab(null); // hashtag feed has no pinned tab
+    currentFeedURL = '/feed/hashtags?tags=' + encodeURIComponent(tag) +
+        '&author=' + encodeURIComponent(author);
+    htmx.ajax('GET', currentFeedURL, { target: '#feed-root', swap: 'innerHTML' });
+}
+
+// --- Hashtag context menu ---
+
+// Clicking a hashtag span opens this small anchored popover (Bluesky-style) rather
+// than switching feeds immediately. It offers "See #tag posts" (the merged hashtag
+// feed) and, when the hashtag belongs to a post with a known author, "See #tag posts
+// by @author" (the author-filtered feed). In author-less contexts — profile bios —
+// only the first option renders. The popover mirrors the repost menu exactly: a
+// positioned div, capture-phase outside-click close, Escape close, stopPropagation
+// throughout, addEventListener only (no hx-on — dead under our CSP, Gotcha 17).
+//
+// Deliberate asymmetry: the right-rail recent tags (layout.html) keep calling
+// switchToHashtagFeed directly — they are YOUR own tags, so a "by @you" option is
+// noise; a menu there would be pure friction.
+let _hashtagMenu = null;
+let _hashtagMenuAnchor = null;
+
+function closeHashtagMenu() {
+    if (_hashtagMenu) {
+        _hashtagMenu.remove();
+        _hashtagMenu = null;
+        _hashtagMenuAnchor = null;
+        document.removeEventListener('click', onHashtagMenuOutsideClick, true);
+    }
+}
+
+function onHashtagMenuOutsideClick(evt) {
+    if (_hashtagMenu && !_hashtagMenu.contains(evt.target)) closeHashtagMenu();
+}
+
+// openHashtagMenu(evt, tag, authorHandle) — tag is bare (no '#'); authorHandle may be
+// empty. Text nodes are built with textContent (never innerHTML) so a hashtag or
+// handle can never inject markup.
+function openHashtagMenu(evt, tag, authorHandle) {
+    evt.stopPropagation();
+    // A second click on the same hashtag toggles the menu closed.
+    if (_hashtagMenu && _hashtagMenuAnchor === evt.currentTarget) {
+        closeHashtagMenu();
+        return;
+    }
+    closeHashtagMenu();
+
+    const anchor = evt.currentTarget;
+    const menu = document.createElement('div');
+    menu.className = 'hashtag-menu';
+
+    const seePosts = document.createElement('button');
+    seePosts.type = 'button';
+    seePosts.className = 'hashtag-menu-item';
+    seePosts.textContent = 'See #' + tag + ' posts';
+    seePosts.addEventListener('click', function(e) {
+        e.stopPropagation();
+        closeHashtagMenu();
+        switchToHashtagFeed([tag]);
+    });
+    menu.appendChild(seePosts);
+
+    if (authorHandle) {
+        const byAuthor = document.createElement('button');
+        byAuthor.type = 'button';
+        byAuthor.className = 'hashtag-menu-item';
+        byAuthor.textContent = 'See #' + tag + ' posts by @' + authorHandle;
+        byAuthor.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeHashtagMenu();
+            switchToHashtagFeedByAuthor(tag, authorHandle);
+        });
+        menu.appendChild(byAuthor);
+    }
+
+    document.body.appendChild(menu);
+
+    // Anchor just below the hashtag; nudge left so the menu doesn't overflow the viewport.
+    const rect = anchor.getBoundingClientRect();
+    let left = rect.left + window.scrollX;
+    const top = rect.bottom + window.scrollY + 4;
+    const menuWidth = menu.offsetWidth;
+    if (left + menuWidth > window.scrollX + document.documentElement.clientWidth - 8) {
+        left = window.scrollX + document.documentElement.clientWidth - menuWidth - 8;
+    }
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+
+    _hashtagMenu = menu;
+    _hashtagMenuAnchor = anchor;
+    document.addEventListener('click', onHashtagMenuOutsideClick, true);
 }
 
 // --- Settings: theme selector ---

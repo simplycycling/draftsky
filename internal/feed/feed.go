@@ -209,7 +209,12 @@ func (c *Client) GetFollowingFeed(ctx context.Context, did, sessionID, cursor st
 // cursor-based pagination. The cursor is an indexedAt timestamp — only posts with
 // indexedAt strictly before the cursor are returned. Tags may or may not include a
 // leading '#'; it is stripped and re-added for the query.
-func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags []string, cursor string, limit int) (*FeedPage, error) {
+//
+// author (optional) filters to posts by a single account — a handle or DID; searchPosts
+// resolves handles to DID server-side. This backs the "See #tag posts by @handle" menu
+// option. Empty author means the ordinary merged hashtag feed. The caller must validate
+// author (handle/DID form) before calling.
+func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags []string, author, cursor string, limit int) (*FeedPage, error) {
 	if len(tags) == 0 {
 		return &FeedPage{Posts: []PostView{}}, nil
 	}
@@ -241,7 +246,7 @@ func (c *Client) GetHashtagFeed(ctx context.Context, did, sessionID string, tags
 			// merge a large pool before applying the caller's limit.
 			out, err := appbsky.FeedSearchPosts(
 				ctx, apiClient,
-				"",            // author
+				author,        // author (empty = no author filter)
 				"",            // cursor (we do our own cursor logic after merging)
 				"",            // domain
 				"",            // lang

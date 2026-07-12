@@ -40,7 +40,9 @@
             </div>
 
             {{if .Profile.Description}}
-            <p class="profile-bio">{{highlightFacets .Profile.Description}}</p>
+            {{/* Bio hashtags have no owning post author, so pass "" — the hashtag
+                 menu then shows only the "See #tag posts" option. */}}
+            <p class="profile-bio">{{highlightFacets .Profile.Description ""}}</p>
             {{end}}
 
             <div class="profile-stats">
