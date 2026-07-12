@@ -223,7 +223,7 @@ Applied migrations: 000001_create_users, 000002_create_templates, 000003_add_pla
 | GET    | /feed/following  | HTMX partial — Following feed                   |
 | GET    | /feed/hashtags   | HTMX partial — merged hashtag feed              |
 | GET    | /templates       | Template management page                        |
-| GET    | /settings        | Settings page (Account + theme selector)        |
+| GET    | /settings        | Settings (page not yet built — priority item)   |
 | GET    | /login           | Login page (public; bounces if authed)          |
 
 ### Infrastructure
@@ -378,26 +378,6 @@ draftsky/
     until a side effect (error rendering, input clearing) never runs. Use delegated
     `htmx:*` listeners in app.js instead (one `htmx:afterRequest` dispatcher keyed on
     `evt.detail.elt`). Plain-JSON `hx-vals` is fine; `hx-vals="js:..."` would not be.
-18. **`putRecord` + indigo's non-omitempty `SwapRecord` = `InvalidSwap`.** indigo's
-    `RepoPutRecord_Input.SwapRecord` is `*string` with **no** `omitempty`, so a nil value
-    serialises as `"swapRecord": null`. In AT Protocol a *null* swapRecord is not "skip
-    the check" — it asserts *the record does not currently exist*. Updating an existing
-    record (e.g. `app.bsky.actor.profile/self` to edit a bio) therefore fails with
-    `HTTP 400 InvalidSwap: Record was at <cid>` — nothing is written, but the write is
-    rejected. Fix: on the get-then-put, capture the current record's CID from the
-    `getRecord` response and pass it as `SwapRecord` (a real compare-and-swap, which also
-    guards against clobbering avatar/banner blobs in a read→write race). Leave it nil only
-    for a genuine create (no record yet), where null="assert none exists" is correct. This
-    passed build, unit tests, and template-render tests — it only surfaced against a live
-    PDS (see Gotcha 16: async/external-API behaviour needs one real execution).
-19. **Test mutations touch only rows the test created.** A test that writes to a shared
-    database (templates, post_history, users) must confine every insert/update/delete to
-    rows it created in that same run, and destructive cleanup must match on the **id
-    captured at creation time**, never on a name/handle/other human-meaningful field.
-    Matching cleanup on a name (`DELETE ... WHERE name = 'Devils Game'`) will silently
-    wipe a real row a developer happens to have with that name; matching on the captured
-    id (`WHERE id = <id returned by the create>`) cannot. Capture the id the create
-    returns, use it for teardown, and scope every assertion to it.
 
 ---
 
@@ -445,48 +425,64 @@ in Docker (`docker start draftsky-dev-db`).
   emails excluded), incoming mentions accent-rendered in feeds
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
-- Free-tier enforcement: server-side 5-template cap on both create paths (JSON API +
-  HTMX web form), 403 with an upgrade message (permission boundary, not 409); paid
-  users short-circuit before the count query. Templates page renders the Add form
-  disabled (inputs + button) with an inline muted note at the cap; edits/deletes/
-  reorders are never capped. `RequirePaidPlan` middleware exists for future paid-only
-  endpoints (not yet mounted; the theme endpoint keeps its own inline check)
-- Trusted proxies scoped to RFC 1918 private ranges + RFC 6598 CGNAT (`10/8`,
-  `172.16/12`, `192.168/16`, `100.64/10`) so Railway's internal proxy's X-Forwarded-For
-  is honoured but external clients cannot forge a client IP (log-accuracy-only today —
-  rate limiting is per-DID)
-- Quote posts: the repost count opens a dependency-free Repost/Quote popover (anchored
-  div in app.js, outside-click/Escape close, stopPropagation so card nav never fires;
-  Repost/Undo go straight to /api/repost via fetch and swap the span fragment in place,
-  carrying data-author/data-text forward for a later Quote). Composer gains a quote mode
-  mirroring reply mode but with the quoted-post preview BELOW the textarea; reply and
-  quote contexts are mutually exclusive (opening one clears the other). Submission adds
-  quote_uri/quote_cid; `validatePostRefs` enforces both-or-neither, quote+reply→400, and
-  empty text allowed only with quote refs (bare quote-repost). `Post()` attaches an
-  `app.bsky.embed.record` embed (via `buildQuoteEmbed`) that coexists with hashtag +
-  mention facets; outgoing quotes render through the existing QuotedPost pipeline.
 - Railway deployment, custom domain, bare-domain 301 redirect
 
-### Current priority order (pre-GA ladder — GA after item 4)
-1. **Profiles** — `/profile/<handle>` view: getProfile header (avatar, banner, display
+### Current priority order (pre-GA ladder — GA after item 6)
+1. **Free tier enforcement** — 5-template limit on POST /api/templates (server-side,
+   403/409 with a clear message when a free user has 5), `RequirePaidPlan` middleware
+   for future paid-only endpoints; scope trusted proxies to Railway's CIDR (replace
+   the 0.0.0.0/0 placeholder)
+2. **Quote posts** — the repost button becomes a small Repost/Quote menu; Quote opens
+   the composer in quote mode (like reply mode, carrying `{uri, cid}`), which attaches
+   an `app.bsky.embed.record` to the post record. Templates work in quotes. Quote mode
+   and reply mode are mutually exclusive in v1.
+3. **Profiles** — `/profile/<handle>` view: getProfile header (avatar, banner, display
    name, bio, follower/following/post counts) + getAuthorFeed with cursor pagination
    through the existing feed rendering. Own profile gets text-only editing (display
    name + bio via putRecord on the profile record). Avatar/banner UPLOAD is deferred
    to photo posting post-GA (needs uploadBlob). Clicking avatars/handles anywhere in
    feeds navigates to the profile.
-2. **Clickable mentions** — the accent mention spans in feeds get click-through to
+4. **Clickable mentions** — the accent mention spans in feeds get click-through to
    `/profile/<handle>` (stopPropagation so card click-through survives, same pattern
    as hashtags)
-3. **Mention typeahead** — composer: typing `@` + chars triggers a debounced
+5. **Mention typeahead** — composer: typing `@` + chars triggers a debounced
    searchActorsTypeahead dropdown; keyboard navigation (up/down/enter/escape),
    insert-on-select. Works in both new-post and reply/quote modes.
-4. **Hashtag context menu** — Bluesky-style popover on hashtag click: "See #tag posts"
+6. **Hashtag context menu** — Bluesky-style popover on hashtag click: "See #tag posts"
    (existing hashtag feed) and "See #tag posts by user" (author feed filtered — check
    whether searchPosts supports author+tag; if not, defer this half too and note it).
    "Mute #tag" is explicitly DEFERRED post-GA (needs a mutes table + filtering on
    every feed path).
+7. **Quoted-card click-through diagnosis + fix** — observed dead on a post with an
+   external link (GIF) above a quoted card containing a video thumbnail: clicking the
+   quoted card did not navigate to the quoted thread. Click-through was built and
+   verified in the quote session, so this is likely a regression or a layering issue
+   (video-thumb-inside-quote or link-above-quote). Diagnose in dev tools FIRST, then
+   fix. If diagnosis shows it's not a regression but a per-composition gap, fix the
+   composition. Regressions don't ship to GA.
+8. **Usage instrumentation + admin stats** — migration: `last_seen_at TIMESTAMPTZ` on
+   `users`, touched by the auth middleware in a detached goroutine, throttled (write
+   only when the stored value is >1h stale — not a DB write per request). Admin page:
+   `GET /admin/stats`, gated to the owner's DID (env var `ADMIN_DID`), rendered via
+   the layout: total users, new today/this week, DAU/WAU/MAU from last_seen_at.
+   Pull-based nightly report; email push is a post-GA upgrade if desired. Ship the
+   column BEFORE GA — activity data not collected from day one is gone forever.
+9. **Inherit Bluesky mutes + blocks (contained version)** — DraftSky currently shows
+   content the user's Bluesky account has muted or blocked. Pre-GA scope, all at the
+   `mapFeedViewPosts` chokepoint every feed flows through:
+   (a) honour the `muted` and `blockedBy`/blocking viewer flags on posts — drop them
+   from feed pages (v1 drops rather than collapse-with-reveal);
+   (b) muted words/tags from `getPreferences` (`mutedWordsPref` — same call saved
+   feeds already use; cache per page render) matched client-side against post text
+   and hashtags, per its targets/actorTarget rules as documented in the lexicon;
+   (c) verify the merged hashtag feed (searchPosts) — blocks may NOT be server-filtered
+   there the way getTimeline/getFeed are; if so the flag-honouring in (a) covers it,
+   confirm with a real blocked account.
+   FULL parity (collapse-with-"show anyway" UI, muted-thread handling, profile-page
+   interstitials for blocked accounts, mute expiry times) is post-GA polish — filed
+   below.
 
-After item 4: **GA**.
+After item 9: **GA**.
 
 ### Post-GA / longer term
 - **Hashtag activity counter** (small) — when the post-submit hashtag feed appears,
@@ -504,6 +500,28 @@ After item 4: **GA**.
   of the paid tier's value story for channel-runners and self-promoters.
 - Browser Notifications API on top of the unread poll (opt-in from settings; OS-level
   notification when count rises while tab unfocused)
+- **Full mute/block parity** — collapse-with-"show anyway" UI instead of dropping,
+  muted-thread handling, profile-page interstitials for blocked/blocking accounts,
+  muted-word expiry times, and "Mute #tag" write-path (creates the preference on the
+  user's Bluesky account so it inherits everywhere — supersedes the old local-mutes
+  idea). Builds on pre-GA item 9.
+- **Feed position persistence** — Home (and app open) currently always lands on
+  Following; it should restore the last-active feed tab. Scroll position restores ONLY
+  for in-app navigation (Home from Notifications → last feed at previous scroll);
+  reload or fresh arrival → last feed at TOP. Shape: last tab in localStorage
+  (survives sessions), scroll in sessionStorage keyed per-feed (dies with the tab —
+  gives reload-to-top nearly free, but distinguish in-app HTMX nav from full reload
+  carefully). Fall back to Following when the remembered feed no longer exists
+  (unpinned — the saved-feed-skip handles absence).
+- **GIF embeds render as link cards, not inline media** — Bluesky ships Tenor/Klipy
+  GIFs as `embed.external` with a media URL and its client special-cases them into an
+  inline looping player; DraftSky shows the generic link card. Detect GIF-hosting
+  external embeds (tenor.com / klipy.com media URLs) and render an inline looping
+  <video muted loop playsinline> or <img> instead.
+- **Video in quoted cards is thumbnail-only with no path to playback** — deliberate
+  quote-session scope, but real posts (quote + video) show the cost. Likely fix:
+  clicking the quoted video thumbnail navigates to the quoted post's thread where it
+  plays. Revisit alongside the GIF work.
 - Avatar/banner editing on profiles (rides with photo posting — uploadBlob)
 - "Mute #tag" in the hashtag context menu (mutes table + filtering on every feed path)
 - Search (searchPosts, searchActors)
@@ -517,8 +535,7 @@ After item 4: **GA**.
 ### Technical debt
 - CSP uses 'unsafe-inline' — migrate to nonces
 - Rate limiter sync.Map grows unbounded — needs cleanup or Redis at scale
-- Trusted proxies pinned to private/CGNAT ranges rather than a Railway-published edge
-  CIDR (none exists today); revisit if Railway documents a stable public egress range
+- Trusted proxies at 0.0.0.0/0 pending Railway CIDR scoping
 
 ---
 
@@ -576,7 +593,7 @@ All colours are defined in the `:root {}` block in `/static/style.css`.
 
 Themes are sets of CSS variable overrides. The user's theme is injected as a class on
 the `<body>` tag by the Go template, based on the `theme` column. Free users are locked
-to `ocean`; paid users can select any theme from the settings page.
+to `ocean`; paid users can select any theme (settings page — pending).
 
 | Theme key  | Name              | Plan     | Accent    | Base                    |
 |------------|-------------------|----------|-----------|-------------------------|
@@ -606,8 +623,7 @@ DraftSky uses a freemium model on web and an ad-supported + one-time purchase mo
 - Free tier: up to 5 templates, Following feed, posting, replies, Ocean theme only
 - Paid tier: unlimited templates, all themes, tabbed hashtag feed (future), hashtag
   performance analytics (future — the paid flagship; see roadmap)
-- Enforced via the `plan` column: the 5-template cap and theme gate are live server-side;
-  `RequirePaidPlan` middleware is ready for future paid-only endpoints (analytics)
+- Enforced via the `plan` column (enforcement pending — priority item 5)
 
 **iOS (future):**
 - Ads by default (AdMob or equivalent); non-consumable IAP via StoreKit 2 removes them
