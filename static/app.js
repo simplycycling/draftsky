@@ -151,10 +151,14 @@ function selectedOption() {
     return sel.options[sel.selectedIndex];
 }
 
-function updateCounter() {
-    const text = document.getElementById('composer-textarea').value;
-    const opt = selectedOption();
-    const suffix = (opt && opt.dataset.suffix) ? opt.dataset.suffix : '';
+// composerState is the pure core of updateCounter: from the raw textarea text, the
+// selected template's suffix ('' when none), and whether a quote context is present, it
+// computes the combined body+suffix string, the remaining grapheme budget, and whether
+// the Post button should be disabled. Extracted so the enable rule is unit-testable
+// (jstests/composer_test.js): the load-bearing invariant is that a plain post (or reply)
+// with any non-whitespace body text ALWAYS enables — reply mode does not enter here
+// because it never changes the rule (only quoteContext relaxes the empty-body case).
+function composerState(text, suffix, hasQuoteContext) {
     let combined;
     if (suffix) {
         const normalised = text.replace(/\r\n/g, '\n');
@@ -164,16 +168,25 @@ function updateCounter() {
         combined = text;
     }
     const remaining = MAX_CHARS - graphemeLength(combined);
+    // A bare quote-repost (quote context, empty body) is a valid post, so the Post
+    // button enables on quote-context-present even with an empty textarea. Every other
+    // mode requires non-whitespace body text.
+    const disabled = remaining < 0 || (text.trim() === '' && !hasQuoteContext);
+    return { combined, remaining, disabled };
+}
+
+function updateCounter() {
+    const text = document.getElementById('composer-textarea').value;
+    const opt = selectedOption();
+    const suffix = (opt && opt.dataset.suffix) ? opt.dataset.suffix : '';
+    const { remaining, disabled } = composerState(text, suffix, !!quoteContext);
 
     const counter = document.getElementById('char-counter');
     counter.textContent = String(remaining);
     counter.className = 'char-counter' +
         (remaining < 0 ? ' over' : remaining < 20 ? ' warn' : '');
 
-    // A bare quote-repost (quote context, empty body) is a valid post, so the Post
-    // button enables on quote-context-present even with an empty textarea.
-    const btn = document.getElementById('composer-post-btn');
-    btn.disabled = remaining < 0 || (text.trim() === '' && !quoteContext);
+    document.getElementById('composer-post-btn').disabled = disabled;
 }
 
 function onTemplateChange() {
@@ -1379,5 +1392,5 @@ async function toggleFollow(btn) {
 // keeps this a no-op in the browser, where `module` is undefined — app.js stays a plain
 // non-module script served straight to the page.
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { findMentionQuery };
+    module.exports = { findMentionQuery, composerState };
 }
