@@ -1,0 +1,69 @@
+{{define "roadmap"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DraftSky - Roadmap</title>
+    <link rel="stylesheet" href="/static/style.css?v={{ assetVersion "/static/style.css" }}">
+</head>
+<body class="ocean">
+
+<div class="landing roadmap">
+    <header class="landing-hero">
+        <a href="/" class="landing-wordmark landing-wordmark-link">DraftSky</a>
+        <p class="landing-pitch">Where DraftSky is headed</p>
+    </header>
+
+    <section class="roadmap-section">
+        <h2 class="roadmap-heading">Shipped</h2>
+        <p class="roadmap-lead">DraftSky is already a full Bluesky client. Here's what's live today.</p>
+        <ul class="roadmap-list roadmap-list-shipped">
+            <li>Template-based posting with correct hashtag and mention facets</li>
+            <li>Post, then land straight in a merged feed of every hashtag you used</li>
+            <li>Saved feed tabs from your Bluesky pinned feeds</li>
+            <li>Threads, replies, quotes, and reposts</li>
+            <li>Likes</li>
+            <li>Profiles</li>
+            <li>Notifications with a live unread badge</li>
+            <li>@-mention typeahead in the composer</li>
+            <li>Inline video playback</li>
+            <li>Image, link, and GIF-link embeds</li>
+            <li>Your Bluesky mutes and blocks inherited automatically</li>
+            <li>A free tier that's free forever</li>
+        </ul>
+    </section>
+
+    <section class="roadmap-section">
+        <h2 class="roadmap-heading">Coming next</h2>
+        <p class="roadmap-lead">What we're building now.</p>
+        <ul class="roadmap-list">
+            <li>Inline GIF playback</li>
+            <li>Search, for posts and people</li>
+            <li>Remembering your last feed and scroll position</li>
+            <li>Photo posting</li>
+            <li>Richer moderation controls</li>
+        </ul>
+    </section>
+
+    <section class="roadmap-section">
+        <h2 class="roadmap-heading">Exploring</h2>
+        <p class="roadmap-lead">Things we're thinking about - no promises.</p>
+        <ul class="roadmap-list roadmap-list-exploring">
+            <li>Direct messages</li>
+            <li>An iOS app</li>
+            <li>Hashtag performance insights for your own posts</li>
+            <li>Template sharing</li>
+        </ul>
+    </section>
+
+    <footer class="landing-footer">
+        <a href="/">Home</a>
+        &middot; Built by
+        <a href="https://bsky.app/profile/rogersherman.com" rel="me">@rogersherman.com</a>
+    </footer>
+</div>
+
+</body>
+</html>
+{{end}}

@@ -141,6 +141,7 @@ type UIHandler struct {
 	tmplSettings      *template.Template
 	tmplAdmin         *template.Template
 	tmplLogin         *template.Template
+	tmplRoadmap       *template.Template
 	tmpl404           *template.Template
 	tmpl500           *template.Template
 }
@@ -382,6 +383,10 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmplRoadmap, err := template.New("").Funcs(funcMap).ParseFiles("templates/roadmap.html")
+	if err != nil {
+		return nil, err
+	}
 	tmpl404, err := template.ParseFiles("templates/404.html")
 	if err != nil {
 		return nil, err
@@ -402,6 +407,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		tmplSettings:      tmplSettings,
 		tmplAdmin:         tmplAdmin,
 		tmplLogin:         tmplLogin,
+		tmplRoadmap:       tmplRoadmap,
 		tmpl404:           tmpl404,
 		tmpl500:           tmpl500,
 	}, nil
@@ -438,6 +444,16 @@ func (h *UIHandler) HandleLoginPage(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplLogin.ExecuteTemplate(c.Writer, "login", nil); err != nil {
 		slog.Error("render login template", "err", err)
+	}
+}
+
+// HandleRoadmapPage renders the public, hand-curated roadmap marketing page.
+// It is intentionally accessible to logged-out visitors (the target audience)
+// and logged-in users alike — no session required, no redirect.
+func (h *UIHandler) HandleRoadmapPage(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplRoadmap.ExecuteTemplate(c.Writer, "roadmap", nil); err != nil {
+		slog.Error("render roadmap template", "err", err)
 	}
 }
 

@@ -1578,6 +1578,76 @@ button {
     }
 }
 
+.landing-wordmark-link {
+    display: inline-block;
+    text-decoration: none;
+}
+
+.roadmap {
+    max-width: 680px;
+}
+
+.roadmap-section {
+    text-align: left;
+}
+
+.roadmap-heading {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--color-text);
+    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+}
+
+.roadmap-lead {
+    color: var(--color-muted);
+    font-size: 0.92rem;
+    margin-bottom: 16px;
+}
+
+.roadmap-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.roadmap-list li {
+    position: relative;
+    padding: 12px 16px 12px 40px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    color: var(--color-text);
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.roadmap-list li::before {
+    content: "";
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 50%;
+    background: var(--color-accent);
+}
+
+.roadmap-list-shipped li::before {
+    background: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+.roadmap-list-exploring li::before {
+    background: transparent;
+    border: 1.5px solid var(--color-muted);
+    width: 7px;
+    height: 7px;
+    margin-top: -3.5px;
+}
+
 .login-input {
     display: block;
     width: 100%;

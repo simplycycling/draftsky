@@ -160,6 +160,7 @@ func main() {
 			"User-agent: *\n"+
 				"Allow: /\n"+
 				"Allow: /login\n"+
+				"Allow: /roadmap\n"+
 				"Disallow: /api/\n"+
 				"Disallow: /auth/\n"+
 				"Disallow: /feed/\n"+
@@ -192,6 +193,7 @@ func main() {
 		os.Exit(1)
 	}
 	r.GET("/login", uiH.HandleLoginPage)
+	r.GET("/roadmap", uiH.HandleRoadmapPage)
 	r.NoRoute(uiH.Handle404)
 
 	// Authenticated web UI routes. RequireCSRF runs after RequireSession (which
