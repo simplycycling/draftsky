@@ -1465,39 +1465,117 @@ button {
 }
 
 /* =========================================================
-   Login page
+   Landing / login page
    ========================================================= */
 
-.login-page {
-    min-height: 100vh;
+.landing {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 56px 24px 40px;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
+    flex-direction: column;
+    gap: 44px;
 }
 
-.login-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-card);
-    border-radius: var(--radius);
-    padding: 40px 36px;
-    width: 100%;
-    max-width: 380px;
+.landing-hero {
     text-align: center;
 }
 
-.login-logo {
-    font-size: 1.6rem;
+.landing-wordmark {
+    font-size: 2.4rem;
     font-weight: 800;
     color: var(--color-accent);
-    letter-spacing: -0.02em;
-    margin-bottom: 6px;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 12px;
 }
 
-.login-tagline {
+.landing-pitch {
+    color: var(--color-text);
+    font-size: 1.12rem;
+    font-weight: 500;
+    margin-bottom: 28px;
+}
+
+.landing-form {
+    max-width: 380px;
+    margin: 0 auto;
+    text-align: left;
+}
+
+.landing-form-note {
+    margin-top: 12px;
+    color: var(--color-muted);
+    font-size: 0.82rem;
+    text-align: center;
+}
+
+.landing-about {
+    color: var(--color-text);
+    font-size: 1rem;
+    line-height: 1.6;
+}
+
+.landing-about p + p {
+    margin-top: 16px;
+}
+
+.landing-features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+}
+
+.landing-feature {
+    background: var(--color-surface);
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    padding: 20px 18px;
+}
+
+.landing-feature h3 {
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: var(--color-accent);
+    margin-bottom: 8px;
+}
+
+.landing-feature p {
     color: var(--color-muted);
     font-size: 0.88rem;
-    margin-bottom: 32px;
+    line-height: 1.5;
+}
+
+.landing-footer {
+    text-align: center;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+    padding-top: 8px;
+}
+
+.landing-footer a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+.landing-footer a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 560px) {
+    .landing {
+        padding: 40px 20px 32px;
+        gap: 36px;
+    }
+    .landing-wordmark {
+        font-size: 2rem;
+    }
+    .landing-pitch {
+        font-size: 1.02rem;
+    }
+    .landing-features {
+        grid-template-columns: 1fr;
+    }
 }
 
 .login-input {

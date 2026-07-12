@@ -378,7 +378,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
-	tmplLogin, err := template.ParseFiles("templates/login.html")
+	tmplLogin, err := template.New("").Funcs(funcMap).ParseFiles("templates/login.html")
 	if err != nil {
 		return nil, err
 	}

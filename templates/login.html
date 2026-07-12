@@ -4,16 +4,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DraftSky — Sign In</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>DraftSky - A Bluesky client built around smarter posting</title>
+    <link rel="stylesheet" href="/static/style.css?v={{ assetVersion "/static/style.css" }}">
 </head>
 <body class="ocean">
 
-<div class="login-page">
-    <div class="login-card">
-        <div class="login-logo">DraftSky</div>
-        <p class="login-tagline">Post to Bluesky with templates</p>
-        <form action="/auth/login" method="GET">
+<div class="landing">
+    <header class="landing-hero">
+        <div class="landing-wordmark">DraftSky</div>
+        <p class="landing-pitch">A Bluesky client built around smarter posting</p>
+
+        <form class="landing-form" action="/auth/login" method="GET">
             <input
                 class="login-input"
                 type="text"
@@ -27,7 +28,42 @@
             >
             <button type="submit" class="btn-signin">Sign in with Bluesky</button>
         </form>
-    </div>
+        <p class="landing-form-note">Free Forever - Premium Coming Soon</p>
+    </header>
+
+    <section class="landing-about">
+        <p>
+            DraftSky is a full Bluesky client built around template-based posting.
+            Save the hashtag sets and recurring text you use for a topic once, then
+            pick a template when you compose - it's appended to your post automatically,
+            so you never retype the same tags again.
+        </p>
+        <p>
+            The moment you post, DraftSky switches you into a live, merged feed of every
+            hashtag you just used - so you land straight in the conversation you've
+            entered.
+        </p>
+    </section>
+
+    <section class="landing-features">
+        <div class="landing-feature">
+            <h3>Posting templates</h3>
+            <p>Named sets of hashtags and recurring text, appended to your post with correct facets - no more retyping.</p>
+        </div>
+        <div class="landing-feature">
+            <h3>The feed follows your post</h3>
+            <p>Post, and DraftSky drops you into a merged, recency-sorted feed of every hashtag you used.</p>
+        </div>
+        <div class="landing-feature">
+            <h3>A complete client</h3>
+            <p>Feeds, threads, replies, quotes, profiles and notifications - everything you expect, in one place.</p>
+        </div>
+    </section>
+
+    <footer class="landing-footer">
+        Built by
+        <a href="https://bsky.app/profile/rogersherman.com" rel="me">@rogersherman.com</a>
+    </footer>
 </div>
 
 </body>
