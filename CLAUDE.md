@@ -530,6 +530,9 @@ After item 9: **GA**.
 - Direct messages (chat.bsky.convo.* — complex, separate proxy infrastructure)
 - Tabbed (per-hashtag) feed view as alternative to merged
 - iOS app (SwiftUI, same /api/* endpoints, feature parity)
+- **Static asset cache-busting** — version/hash query param on app.js and style.css
+  URLs (bumped per deploy) so users never run stale assets after a deploy; ends the
+  Gotcha 10 class of bug for end users.
 - Template sharing / starter packs
 
 ### Technical debt
