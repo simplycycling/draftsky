@@ -76,6 +76,61 @@ func mapProfile(out *appbsky.ActorDefs_ProfileViewDetailed, sessionDID string) *
 	return p
 }
 
+// ActorSuggestion is the lean actor shape returned by the composer's @-mention
+// typeahead — just enough to render a dropdown row (avatar + display name + handle)
+// and insert the handle. No indigo types leak out.
+type ActorSuggestion struct {
+	DID         string `json:"did"`
+	Handle      string `json:"handle"`
+	DisplayName string `json:"display_name,omitempty"`
+	Avatar      string `json:"avatar,omitempty"`
+}
+
+// mapActorSuggestions converts indigo ProfileViewBasic actors to the lean suggestion
+// shape, skipping nil entries and dereferencing the optional display-name/avatar
+// pointers. Extracted as a pure function so the mapping is unit-testable without a live
+// PDS. Always returns a non-nil slice so JSON encodes [] rather than null (Gotcha 9).
+func mapActorSuggestions(actors []*appbsky.ActorDefs_ProfileViewBasic) []ActorSuggestion {
+	out := make([]ActorSuggestion, 0, len(actors))
+	for _, a := range actors {
+		if a == nil {
+			continue
+		}
+		s := ActorSuggestion{DID: a.Did, Handle: a.Handle}
+		if a.DisplayName != nil {
+			s.DisplayName = *a.DisplayName
+		}
+		if a.Avatar != nil {
+			s.Avatar = *a.Avatar
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// SearchActorsTypeahead returns up to limit actor suggestions for the prefix query q
+// via app.bsky.actor.searchActorsTypeahead, run under the user's OAuth session. A blank
+// q short-circuits to an empty slice (never an error) before any session resume — the
+// prefix API treats an empty query as "match nothing" and the composer would close the
+// dropdown anyway. The deprecated `term` parameter is passed empty; only `q` is used.
+func (c *Client) SearchActorsTypeahead(ctx context.Context, did, sessionID, q string, limit int) ([]ActorSuggestion, error) {
+	if strings.TrimSpace(q) == "" {
+		return []ActorSuggestion{}, nil
+	}
+
+	apiClient, err := c.resumeAPIClient(ctx, did, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	out, err := appbsky.ActorSearchActorsTypeahead(ctx, apiClient, int64(limit), q, "")
+	if err != nil {
+		return nil, fmt.Errorf("searchActorsTypeahead(%q): %w", q, err)
+	}
+
+	return mapActorSuggestions(out.Actors), nil
+}
+
 // GetProfile fetches an actor's profile via app.bsky.actor.getProfile. actor accepts
 // either a handle or a DID. All requests run under the user's OAuth session so viewer
 // state (following/followedBy) is populated.

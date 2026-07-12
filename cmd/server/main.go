@@ -240,6 +240,7 @@ func main() {
 	rated.DELETE("/repost", repostH.HandleDeleteRepost)
 
 	rated.PUT("/profile", profileH.HandleUpdateProfile)
+	rated.GET("/actors/typeahead", profileH.HandleActorTypeahead)
 
 	followH := handlers.NewFollowHandler(oauthApp)
 	rated.POST("/follow", followH.HandleCreateFollow)

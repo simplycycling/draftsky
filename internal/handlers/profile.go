@@ -206,6 +206,28 @@ func (h *ProfileHandler) HandleGetProfileFeed(c *gin.Context) {
 	c.JSON(http.StatusOK, page)
 }
 
+// typeaheadLimit caps searchActorsTypeahead results for the composer @-mention dropdown.
+const typeaheadLimit = 8
+
+// HandleActorTypeahead returns lean actor suggestions for the composer's @-mention
+// dropdown. Route: GET /api/actors/typeahead?q=. A blank q returns an empty array with
+// 200 (not an error), so the client can call it freely without special-casing the
+// no-query state. Mounted under the operations rate limiter (60/min per DID).
+func (h *ProfileHandler) HandleActorTypeahead(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+	q := strings.TrimSpace(c.Query("q"))
+
+	suggestions, err := h.client.SearchActorsTypeahead(c.Request.Context(), did, sessionID, q, typeaheadLimit)
+	if err != nil {
+		slog.Error("SearchActorsTypeahead failed", "q", q, "did", did, "err", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "typeahead failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, suggestions)
+}
+
 // HandleUpdateProfile edits the authenticated user's own display name and bio via a
 // get-then-put that preserves avatar/banner (see feed.UpdateProfile). Route:
 // PUT /api/profile. HTMX/JS submits form-encoded (Gotcha 2), so fields are read with

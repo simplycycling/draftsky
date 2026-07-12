@@ -39,6 +39,10 @@ let quoteContext = null;
 function openComposer(ctx, mode) {
     replyContext = null;
     quoteContext = null;
+    // The typeahead cache is scoped to a single composer session — people backspace
+    // and retype the same handles constantly within one compose, but a fresh open
+    // starts clean so stale suggestions never leak across composes.
+    _mentionCache.clear();
     if (ctx && mode === 'quote') {
         quoteContext = ctx;
     } else if (ctx) {
@@ -105,6 +109,7 @@ function openComposerQuote(el) {
 function closeComposer() {
     replyContext = null;
     quoteContext = null;
+    closeMentionDropdown();
     document.getElementById('composer-overlay').style.display = 'none';
     document.getElementById('composer-textarea').value = '';
     document.getElementById('composer-textarea').placeholder = "What’s up?";
@@ -251,6 +256,299 @@ function showComposerError(msg) {
     el.textContent = msg;
     el.style.display = 'block';
 }
+
+// --- Composer @-mention typeahead ---
+
+// findMentionQuery is the pure token-detection core: given the textarea's full text and
+// the caret position, it decides whether the caret sits inside an active @-mention
+// token and, if so, returns { query, start } — start being the index of the '@' and
+// query the text between '@' and the caret. Returns null when the caret is not inside a
+// mention token.
+//
+// A token starts at an '@' that begins the text OR is immediately preceded by
+// whitespace (the same boundary rule as the server-side mention facet regex, so emails
+// like foo@bar never trigger), and runs from that '@' to the caret with no intervening
+// whitespace. Anything else — caret after a space, '@' mid-word — is not a token.
+//
+// Purity note: indices here are JS string offsets (UTF-16 code units) into the TEXT.
+// They only ever need to agree with the server on the text CONTENT that gets inserted;
+// the server independently computes UTF-8 BYTE offsets for facets at post time. An
+// emoji earlier in the text shifts these JS indices and the server's byte offsets by
+// different amounts, and that is fine — the two never need to match, only the inserted
+// "@handle " text does. Exported at the bottom of the file for table tests.
+function findMentionQuery(text, caretPos) {
+    if (typeof text !== 'string') return null;
+    if (caretPos < 0 || caretPos > text.length) return null;
+    // Walk back from the caret to the token's '@', bailing the moment we hit whitespace
+    // (caret not inside a token) or run off the front (no '@').
+    let i = caretPos - 1;
+    while (i >= 0) {
+        const ch = text[i];
+        if (ch === '@') break;
+        if (/\s/.test(ch)) return null;
+        i--;
+    }
+    if (i < 0 || text[i] !== '@') return null;
+    // Boundary anchor: the '@' must begin the text or follow whitespace. This is what
+    // excludes emails (the char before '@' in foo@bar is 'o', not whitespace).
+    if (i > 0 && !/\s/.test(text[i - 1])) return null;
+    return { query: text.slice(i + 1, caretPos), start: i };
+}
+
+// Dropdown state. All confined to the composer's lifetime; reset on close.
+let _mentionDropdown = null;      // the anchored <div> or null when closed
+let _mentionResults = [];         // current suggestion rows
+let _mentionActiveIndex = -1;     // keyboard/hover-highlighted row
+const _mentionCache = new Map();  // query → results, cleared on composer open
+let _mentionAbort = null;         // AbortController for the in-flight fetch
+let _mentionDebounceTimer = null;
+let _mentionBlurTimer = null;
+
+// onComposerInput runs on every textarea input: it keeps the character counter honest
+// (the suffix/newline separator logic in updateCounter, Gotcha 4, must see every change)
+// AND drives mention detection. Replaces the textarea's former oninput=updateCounter.
+function onComposerInput() {
+    updateCounter();
+    handleMentionInput();
+}
+
+// handleMentionInput re-evaluates the mention token at the caret after a text change and
+// schedules a fetch, or closes the dropdown when there is no active token. The min-1-char
+// guard (dropdown waits for the first character after '@') mirrors the fetch guard.
+function handleMentionInput() {
+    const ta = document.getElementById('composer-textarea');
+    if (!ta) return;
+    const token = findMentionQuery(ta.value, ta.selectionStart);
+    if (!token || token.query.length < 1) {
+        closeMentionDropdown();
+        return;
+    }
+    scheduleMentionFetch(token.query);
+}
+
+// handleMentionCaretMove re-checks the token when the caret moves WITHOUT editing text
+// (click, Arrow/Home/End) while the dropdown is open, so leaving the token closes it and
+// moving into a different token refreshes it. No-op when the dropdown is already closed.
+function handleMentionCaretMove() {
+    if (!_mentionDropdown) return;
+    const ta = document.getElementById('composer-textarea');
+    if (!ta) return;
+    const token = findMentionQuery(ta.value, ta.selectionStart);
+    if (!token || token.query.length < 1) {
+        closeMentionDropdown();
+        return;
+    }
+    scheduleMentionFetch(token.query);
+}
+
+function scheduleMentionFetch(query) {
+    clearTimeout(_mentionDebounceTimer);
+    // 200ms debounce: typing bursts collapse to one request.
+    _mentionDebounceTimer = setTimeout(() => fetchMentionSuggestions(query), 200);
+}
+
+async function fetchMentionSuggestions(query) {
+    // Cache hit: render straight from memory (no request), covering backspace/retype.
+    if (_mentionCache.has(query)) {
+        renderMentionDropdown(_mentionCache.get(query), query);
+        return;
+    }
+    // Abort any in-flight request — newer input always wins, so a fast type-then-delete
+    // can never leave a stale dropdown from an older query landing late.
+    if (_mentionAbort) _mentionAbort.abort();
+    _mentionAbort = new AbortController();
+    const signal = _mentionAbort.signal;
+    try {
+        // GET is CSRF-exempt server-side (no token header needed).
+        const res = await fetch('/api/actors/typeahead?q=' + encodeURIComponent(query), { signal });
+        if (res.status === 401) { closeMentionDropdown(); return; } // expired session — fail silent (poll-stop pattern)
+        if (!res.ok) { closeMentionDropdown(); return; }
+        const results = await res.json();
+        _mentionCache.set(query, results);
+        // Guard against a slower request resolving after the token changed: only render
+        // if the caret's current token still matches the query we fetched for.
+        const ta = document.getElementById('composer-textarea');
+        const token = ta ? findMentionQuery(ta.value, ta.selectionStart) : null;
+        if (!token || token.query !== query) return;
+        renderMentionDropdown(results, query);
+    } catch (e) {
+        // AbortError is the expected outcome of rapid typing; anything else, close.
+        if (e && e.name !== 'AbortError') closeMentionDropdown();
+    }
+}
+
+function renderMentionDropdown(results, query) {
+    if (!Array.isArray(results) || results.length === 0) {
+        closeMentionDropdown();
+        return;
+    }
+    _mentionResults = results;
+    _mentionActiveIndex = 0;
+
+    let dd = _mentionDropdown;
+    if (!dd) {
+        dd = document.createElement('div');
+        dd.className = 'mention-dropdown';
+        dd.id = 'mention-dropdown';
+        document.body.appendChild(dd);
+        _mentionDropdown = dd;
+    }
+    dd.innerHTML = '';
+
+    results.forEach((a, idx) => {
+        const row = document.createElement('div');
+        row.className = 'mention-row' + (idx === 0 ? ' active' : '');
+        row.dataset.index = String(idx);
+
+        if (a.avatar) {
+            const img = document.createElement('img');
+            img.className = 'mention-avatar';
+            img.src = a.avatar;
+            img.alt = '';
+            row.appendChild(img);
+        } else {
+            const ph = document.createElement('span');
+            ph.className = 'mention-avatar mention-avatar-empty';
+            row.appendChild(ph);
+        }
+
+        const names = document.createElement('span');
+        names.className = 'mention-names';
+        const disp = document.createElement('span');
+        disp.className = 'mention-display';
+        disp.textContent = a.display_name || a.handle;
+        const handle = document.createElement('span');
+        handle.className = 'mention-handle';
+        handle.textContent = '@' + a.handle;
+        names.appendChild(disp);
+        names.appendChild(handle);
+        row.appendChild(names);
+
+        // mousedown (not click) preventDefault keeps focus in the textarea so the blur
+        // close-timer never fires; the click then inserts.
+        row.addEventListener('mousedown', e => e.preventDefault());
+        row.addEventListener('mouseenter', () => setMentionActive(idx));
+        row.addEventListener('click', e => { e.preventDefault(); insertMention(idx); });
+
+        dd.appendChild(row);
+    });
+
+    positionMentionDropdown();
+    dd.style.display = 'block';
+}
+
+// positionMentionDropdown anchors the dropdown to the textarea's bottom-left corner,
+// spanning the textarea's full width.
+//
+// v1 SIMPLIFICATION: this is deliberately NOT caret-coordinate positioning. Placing the
+// dropdown at the caret's x/y inside a <textarea> needs a mirror-div measurement hack
+// and is a well-known rabbit hole; full-width-below the textarea is unambiguous and good
+// enough. position:fixed against the live textarea rect so it rides the modal regardless
+// of nesting (the composer is a fixed overlay; the modal itself does not scroll).
+function positionMentionDropdown() {
+    const ta = document.getElementById('composer-textarea');
+    if (!_mentionDropdown || !ta) return;
+    const rect = ta.getBoundingClientRect();
+    _mentionDropdown.style.position = 'fixed';
+    _mentionDropdown.style.left = rect.left + 'px';
+    _mentionDropdown.style.top = rect.bottom + 'px';
+    _mentionDropdown.style.width = rect.width + 'px';
+}
+
+function setMentionActive(idx) {
+    _mentionActiveIndex = idx;
+    if (!_mentionDropdown) return;
+    Array.from(_mentionDropdown.children).forEach((row, i) => {
+        row.classList.toggle('active', i === idx);
+    });
+}
+
+// onComposerKeydown intercepts navigation keys ONLY while the dropdown is open. Critically
+// it preventDefaults Enter (so no newline is inserted into the textarea) and the Arrow
+// keys (so the textarea caret does not move) while the list is showing. Escape closes the
+// dropdown and stops propagation so the document-level handler doesn't also close the
+// whole composer. Left/Right/Home/End are intentionally NOT trapped — they move the caret
+// and the keyup handler re-evaluates the token.
+function onComposerKeydown(e) {
+    if (!_mentionDropdown || _mentionDropdown.style.display === 'none') return;
+    switch (e.key) {
+        case 'ArrowDown':
+            e.preventDefault();
+            setMentionActive((_mentionActiveIndex + 1) % _mentionResults.length);
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            setMentionActive((_mentionActiveIndex - 1 + _mentionResults.length) % _mentionResults.length);
+            break;
+        case 'Enter':
+            e.preventDefault();
+            insertMention(_mentionActiveIndex);
+            break;
+        case 'Escape':
+            e.preventDefault();
+            e.stopPropagation();
+            closeMentionDropdown();
+            break;
+        default:
+            break;
+    }
+}
+
+// insertMention replaces the active @partial token with "@handle " (trailing space),
+// restores the caret after the space, closes the dropdown, and fires an input event so
+// updateCounter re-runs over the new text (its suffix/newline separator logic, Gotcha 4,
+// is downstream of this edit). The dispatched input re-detects the token at the new caret
+// — which sits after a space, so no token — and thus does not re-open the dropdown.
+function insertMention(idx) {
+    const a = _mentionResults[idx];
+    const ta = document.getElementById('composer-textarea');
+    if (!a || !ta) { closeMentionDropdown(); return; }
+    const caret = ta.selectionStart;
+    const token = findMentionQuery(ta.value, caret);
+    if (!token) { closeMentionDropdown(); return; }
+
+    const before = ta.value.slice(0, token.start);
+    const after = ta.value.slice(caret);
+    const insert = '@' + a.handle + ' ';
+    ta.value = before + insert + after;
+    const newCaret = before.length + insert.length;
+    ta.setSelectionRange(newCaret, newCaret);
+
+    closeMentionDropdown();
+    ta.focus();
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function closeMentionDropdown() {
+    clearTimeout(_mentionDebounceTimer);
+    if (_mentionAbort) { _mentionAbort.abort(); _mentionAbort = null; }
+    if (_mentionDropdown) {
+        _mentionDropdown.remove();
+        _mentionDropdown = null;
+    }
+    _mentionResults = [];
+    _mentionActiveIndex = -1;
+}
+
+// Wire the composer textarea's mention listeners once at load. The composer partial is
+// rendered into the layout (before this script), so the textarea exists on every authed
+// page. keydown must run in the target phase (before the document Escape/Enter handlers),
+// which addEventListener on the element gives us.
+(function initMentionTypeahead() {
+    const ta = document.getElementById('composer-textarea');
+    if (!ta) return;
+    ta.addEventListener('keydown', onComposerKeydown);
+    ta.addEventListener('keyup', e => {
+        // Caret-moving keys we let through in keydown; re-evaluate the token on release.
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+            handleMentionCaretMove();
+        }
+    });
+    ta.addEventListener('click', handleMentionCaretMove);
+    // Blur closes on a short delay so a row click (which blurs the textarea) lands first.
+    ta.addEventListener('blur', () => { _mentionBlurTimer = setTimeout(closeMentionDropdown, 150); });
+    ta.addEventListener('focus', () => clearTimeout(_mentionBlurTimer));
+})();
 
 // Close composer / repost menu on Escape key. The repost menu takes precedence when
 // both are somehow open (it never is — the menu closes before the composer opens).
@@ -1075,4 +1373,11 @@ async function toggleFollow(btn) {
         // Non-fatal: the button state simply stays as it was.
     }
     btn.disabled = false;
+}
+
+// Export the pure token-detection function for Node table tests (node:test). The guard
+// keeps this a no-op in the browser, where `module` is undefined — app.js stays a plain
+// non-module script served straight to the page.
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { findMentionQuery };
 }

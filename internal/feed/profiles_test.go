@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -135,6 +136,68 @@ func TestIsRecordNotFound(t *testing.T) {
 	for _, tc := range cases {
 		if got := isRecordNotFound(tc.err); got != tc.want {
 			t.Errorf("isRecordNotFound(%q) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+func TestMapActorSuggestions(t *testing.T) {
+	actors := []*appbsky.ActorDefs_ProfileViewBasic{
+		{
+			Did:         "did:plc:friend",
+			Handle:      "friend.bsky.social",
+			DisplayName: strptr("Friendly"),
+			Avatar:      strptr("https://cdn.bsky.app/a.jpg"),
+		},
+		nil, // nil entries are skipped, not mapped to a zero-value row
+		{
+			Did:    "did:plc:bare",
+			Handle: "bare.bsky.social",
+			// no display name, no avatar → those fields stay empty (omitempty in JSON)
+		},
+	}
+
+	got := mapActorSuggestions(actors)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 suggestions (nil skipped), got %d", len(got))
+	}
+	if got[0] != (ActorSuggestion{
+		DID:         "did:plc:friend",
+		Handle:      "friend.bsky.social",
+		DisplayName: "Friendly",
+		Avatar:      "https://cdn.bsky.app/a.jpg",
+	}) {
+		t.Errorf("first suggestion mismatch: %+v", got[0])
+	}
+	if got[1].DID != "did:plc:bare" || got[1].Handle != "bare.bsky.social" ||
+		got[1].DisplayName != "" || got[1].Avatar != "" {
+		t.Errorf("bare suggestion should have empty display/avatar: %+v", got[1])
+	}
+}
+
+func TestMapActorSuggestions_EmptyIsNonNil(t *testing.T) {
+	// Gotcha 9: JSON list responses must encode [] not null.
+	got := mapActorSuggestions(nil)
+	if got == nil {
+		t.Fatal("mapActorSuggestions(nil) must return non-nil empty slice")
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty slice, got %d", len(got))
+	}
+}
+
+func TestSearchActorsTypeahead_BlankQueryShortCircuits(t *testing.T) {
+	// A blank query must return an empty slice without touching the OAuth session, so
+	// a Client with a nil app (no session plumbing) must not panic. Covers "" and
+	// whitespace-only, both of which the prefix API would treat as "match nothing".
+	c := New(nil)
+	for _, q := range []string{"", "   ", "\t"} {
+		got, err := c.SearchActorsTypeahead(context.Background(), "did:plc:me", "sess", q, 8)
+		if err != nil {
+			t.Fatalf("blank q %q: unexpected error %v", q, err)
+		}
+		if got == nil || len(got) != 0 {
+			t.Fatalf("blank q %q: expected empty non-nil slice, got %#v", q, got)
 		}
 	}
 }

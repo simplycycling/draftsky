@@ -2064,3 +2064,64 @@ button {
         margin-top: -32px;
     }
 }
+
+/* --- Composer @-mention typeahead dropdown --- */
+/* Anchored (position:fixed in JS) to the textarea's bottom edge, spanning its width.
+   z-index sits above the composer overlay (100) since the dropdown is appended to
+   <body>, not inside the modal. */
+.mention-dropdown {
+    z-index: 1100;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--color-card);
+    border: 1px solid var(--color-muted);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.mention-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.mention-row.active {
+    background: var(--color-surface);
+}
+
+.mention-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+}
+
+.mention-avatar-empty {
+    background: var(--color-surface);
+}
+
+.mention-names {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.mention-display {
+    color: var(--color-text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mention-handle {
+    color: var(--color-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
