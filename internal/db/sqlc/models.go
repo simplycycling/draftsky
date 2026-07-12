@@ -36,4 +36,5 @@ type User struct {
 	Plan         string
 	Theme        string
 	Avatar       pgtype.Text
+	LastSeenAt   pgtype.Timestamptz
 }

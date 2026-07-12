@@ -1741,6 +1741,32 @@ button {
     margin-bottom: 14px;
 }
 
+/* ---- Admin stats ---- */
+.admin-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.admin-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-card);
+    border-radius: var(--radius);
+    padding: 16px;
+}
+.admin-stat-num {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+.admin-stat-label {
+    font-size: 0.8rem;
+    color: var(--color-muted);
+}
+
 /* ---- Account ---- */
 .account-card {
     display: flex;

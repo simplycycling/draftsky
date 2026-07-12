@@ -181,6 +181,65 @@ func RequirePaidPlan(lookup PlanLookup) gin.HandlerFunc {
 	}
 }
 
+// LastSeenToucher is the narrow surface TouchLastSeen needs. *db.Queries satisfies it.
+type LastSeenToucher interface {
+	TouchUserLastSeen(ctx context.Context, did string) error
+}
+
+// TouchLastSeen records that the authenticated user was active. It must run AFTER
+// RequireAuth or RequireSession, which populate ContextKeyDID. The work happens in a
+// detached goroutine with its own context (the post_history pattern) so it never
+// blocks or fails the request — the request context is cancelled the moment the
+// handler returns, so we deliberately do not reuse it. The once-per-hour staleness
+// gate lives in the SQL (see TouchUserLastSeen), so this fires a cheap UPDATE that
+// no-ops on all but the first request of each hour; there is no preceding SELECT.
+func TouchLastSeen(toucher LastSeenToucher) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		did := c.GetString(ContextKeyDID)
+		if did == "" {
+			c.Next()
+			return
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := toucher.TouchUserLastSeen(ctx, did); err != nil {
+				slog.Warn("TouchUserLastSeen failed", "did", did, "err", err)
+			}
+		}()
+		c.Next()
+	}
+}
+
+// RequireAdmin gates a route to the single owner DID named by adminDID. It is fully
+// self-contained — it validates the session cookie itself rather than sitting behind
+// RequireSession — so that EVERY failure mode (no cookie, invalid cookie, valid cookie
+// for a non-admin, or an unset ADMIN_DID) returns an identical bare 404. A redirect or
+// a 403 would advertise that the route exists; 404 makes it indistinguishable from any
+// unknown path. On success it seeds the DID and session ID into the context (as
+// RequireAuth/RequireSession would) so the handler can render the layout.
+func RequireAdmin(secret []byte, adminDID string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if adminDID == "" {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		cookie, err := c.Request.Cookie(auth.SessionCookieName)
+		if err != nil {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		did, sessionID, err := auth.ParseSessionCookie(cookie.Value, secret)
+		if err != nil || did != adminDID {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.Set(ContextKeyDID, did)
+		c.Set(ContextKeySessionID, sessionID)
+		c.Next()
+	}
+}
+
 // RequireSession validates the signed session cookie and injects the user's DID
 // into the Gin context. Redirects to /login for missing or invalid sessions.
 // Used for web UI routes rendered as HTML pages.

@@ -147,6 +147,7 @@ CREATE TABLE users (
     token_expiry  TIMESTAMPTZ,
     plan          TEXT NOT NULL DEFAULT 'free', -- 'free' | 'paid'; set to 'paid' on verified IAP
     theme         TEXT NOT NULL DEFAULT 'ocean', -- see Themes; non-default is paid-only
+    last_seen_at  TIMESTAMPTZ,             -- activity stamp for DAU/WAU/MAU; NULL until first visit
     created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -173,7 +174,7 @@ CREATE TABLE templates (
 
 Applied migrations: 000001_create_users, 000002_create_templates, 000003_add_plan_to_users,
 000004_create_post_history, 000005_add_theme_to_users, 000006_add_avatar_to_users,
-000007_create_oauth_store.
+000007_create_oauth_store, 000008_add_last_seen_to_users.
 
 ---
 
@@ -225,6 +226,13 @@ Applied migrations: 000001_create_users, 000002_create_templates, 000003_add_pla
 | GET    | /templates       | Template management page                        |
 | GET    | /settings        | Settings (page not yet built — priority item)   |
 | GET    | /login           | Login page (public; bounces if authed)          |
+
+### Admin (owner-only; RequireAdmin gates on ADMIN_DID)
+| Method | Path          | Description                                                    |
+|--------|---------------|----------------------------------------------------------------|
+| GET    | /admin/stats  | Owner dashboard: user totals, new today/week, DAU/WAU/MAU,     |
+|        |               | template + post counts. 404 (not 403/redirect) for any non-   |
+|        |               | owner or missing session — the route's existence is hidden.   |
 
 ### Infrastructure
 | Method | Path          | Description                                        |
@@ -423,6 +431,7 @@ OAUTH_CLIENT_ID     https://www.draftsky.social/client-metadata.json (production
 OAUTH_REDIRECT_URL  https://www.draftsky.social/auth/callback (production)
 APP_ENV             development | production
 PORT                HTTP listen port (default 8080)
+ADMIN_DID           Optional. Owner DID that unlocks GET /admin/stats; unset = 404 for all
 ```
 
 Local dev: no OAUTH_CLIENT_ID → localhost OAuth config; use `http://127.0.0.1:8080`
@@ -460,11 +469,21 @@ in Docker (`docker start draftsky-dev-db`).
   "See #tag posts by @author" (searchPosts author+tag filter, `?author=` on
   /feed/hashtags; validated handle/DID → 400). Reuses the repost-menu pattern; bios
   show one option (no post author); right-rail tags keep direct-switch (your own tags)
+- Usage instrumentation + admin stats — `last_seen_at` (migration 000008) stamped by a
+  detached-goroutine `TouchLastSeen` middleware with an in-SQL once-per-hour staleness
+  gate (no per-request SELECT); owner-only `GET /admin/stats` (RequireAdmin 404s every
+  non-owner/no-session case to hide the route) rendering DAU/WAU/MAU + user/content
+  totals from two single-pass aggregate queries
+- Static asset cache-busting — content-hash `?v=<sha8>` on app.js/style.css (+ hls.min.js
+  via a `<meta>` tag app.js reads), computed once at startup from file bytes; `/static`
+  now served `Cache-Control: public, max-age=31536000, immutable`. Ends the Gotcha 10
+  (stale app.js) class of bug for end users: a deploy that changes an asset mints a fresh
+  URL the browser must re-fetch, unchanged assets stay fully cached
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
 
-### Current priority order (pre-GA ladder — GA after item 6)
+### Current priority order (pre-GA ladder — GA after item 9)
 1. **Free tier enforcement** — 5-template limit on POST /api/templates (server-side,
    403/409 with a clear message when a free user has 5), `RequirePaidPlan` middleware
    for future paid-only endpoints; scope trusted proxies to Railway's CIDR (replace
@@ -504,13 +523,14 @@ in Docker (`docker start draftsky-dev-db`).
    quoted thread ("play it there"). Verified failure + fixed click-map (quoted text /
    quoted video / quoted images / quoted link / outer body / outer link → correct
    destinations) with a byte-identical-function DOM harness. See Gotcha 18.
-8. **Usage instrumentation + admin stats** — migration: `last_seen_at TIMESTAMPTZ` on
-   `users`, touched by the auth middleware in a detached goroutine, throttled (write
-   only when the stored value is >1h stale — not a DB write per request). Admin page:
-   `GET /admin/stats`, gated to the owner's DID (env var `ADMIN_DID`), rendered via
-   the layout: total users, new today/this week, DAU/WAU/MAU from last_seen_at.
-   Pull-based nightly report; email push is a post-GA upgrade if desired. Ship the
-   column BEFORE GA — activity data not collected from day one is gone forever.
+8. **Usage instrumentation + admin stats** — ✅ **DONE** (see Shipped). Migration
+   000008 added `last_seen_at`; the `TouchLastSeen` middleware (mounted on the web +
+   api groups after auth) fires a detached-goroutine `TouchUserLastSeen` whose
+   once-per-hour staleness gate lives IN the SQL (`WHERE ... last_seen_at IS NULL OR
+   < now() - interval '1 hour'`), so no per-request SELECT and no write-per-request.
+   `GET /admin/stats` (RequireAdmin, self-validating → 404 for any non-owner/no-session
+   so the route stays hidden) renders the layout with two single-pass aggregate queries
+   (GetAdminStats FILTER windows + GetContentStats). Email push remains a post-GA upgrade.
 9. **Inherit Bluesky mutes + blocks (contained version)** — DraftSky currently shows
    content the user's Bluesky account has muted or blocked. Pre-GA scope, all at the
    `mapFeedViewPosts` chokepoint every feed flows through:
@@ -574,9 +594,6 @@ After item 9: **GA**.
 - Direct messages (chat.bsky.convo.* — complex, separate proxy infrastructure)
 - Tabbed (per-hashtag) feed view as alternative to merged
 - iOS app (SwiftUI, same /api/* endpoints, feature parity)
-- **Static asset cache-busting** — version/hash query param on app.js and style.css
-  URLs (bumped per deploy) so users never run stale assets after a deploy; ends the
-  Gotcha 10 class of bug for end users.
 - Template sharing / starter packs
 
 ### Technical debt

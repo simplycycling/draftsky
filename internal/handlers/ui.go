@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -104,6 +107,20 @@ type NotificationsPageData struct {
 	Error         string
 }
 
+// AdminStatsData is the data envelope for the owner-only admin stats page. It embeds
+// LayoutData for the chrome and flattens the two stats query rows into template fields.
+type AdminStatsData struct {
+	LayoutData
+	TotalUsers     int64
+	NewToday       int64
+	NewThisWeek    int64
+	DAU            int64
+	WAU            int64
+	MAU            int64
+	TotalTemplates int64
+	TotalPosts     int64
+}
+
 // UIHandler renders HTML pages.
 type UIHandler struct {
 	queries           *db.Queries
@@ -115,16 +132,53 @@ type UIHandler struct {
 	tmplProfile       *template.Template
 	tmplNotifications *template.Template
 	tmplSettings      *template.Template
+	tmplAdmin         *template.Template
 	tmplLogin         *template.Template
 	tmpl404           *template.Template
 	tmpl500           *template.Template
+}
+
+// assetURLToFile maps a public /static URL path to the on-disk file whose content
+// hash busts its cache. Keep it in sync with the assets templates actually reference.
+var assetURLToFile = map[string]string{
+	"/static/app.js":            "static/app.js",
+	"/static/style.css":         "static/style.css",
+	"/static/vendor/hls.min.js": "static/vendor/hls.min.js",
+}
+
+// computeAssetVersions hashes each cache-busted static asset once at startup and
+// returns URL-path → short-hash. The hash is the first 8 hex of the SHA-256 of the
+// file's bytes: it is CONTENT-ADDRESSED, so it changes automatically the moment a
+// deploy ships new asset content and stays identical across restarts that don't.
+// Appended to the asset URL as ?v=<hash>, it turns each deploy's asset into a
+// distinct URL the browser must re-fetch — ending the Gotcha 10 (stale app.js) class
+// of bug for END USERS without any hard refresh. Startup cost is three file reads.
+// A file that cannot be read yields no entry (the template emits the bare URL with no
+// ?v) rather than failing startup — worst case is the pre-existing caching behaviour.
+func computeAssetVersions() map[string]string {
+	versions := make(map[string]string, len(assetURLToFile))
+	for urlPath, file := range assetURLToFile {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			slog.Warn("asset version: read failed, cache-busting disabled for this file", "file", file, "err", err)
+			continue
+		}
+		sum := sha256.Sum256(b)
+		versions[urlPath] = hex.EncodeToString(sum[:])[:8]
+	}
+	return versions
 }
 
 // NewUIHandler parses all page templates and returns a ready UIHandler.
 // Returns an error if any template file cannot be parsed — callers should
 // treat this as fatal at startup.
 func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (*UIHandler, error) {
+	assetVersions := computeAssetVersions()
 	funcMap := template.FuncMap{
+		// assetVersion returns the content hash for a /static URL, for use as a
+		// ?v= cache-busting query param. Empty string when the asset is unknown or
+		// unreadable, so the template simply emits the un-versioned URL.
+		"assetVersion": func(urlPath string) string { return assetVersions[urlPath] },
 		// safeAtURI validates and marks an AT Protocol URI safe for URL-context attributes.
 		"safeAtURI": safeAtURI,
 		// urlquote percent-encodes a string for use in URL query parameters.
@@ -309,6 +363,14 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	if err != nil {
 		return nil, err
 	}
+	tmplAdmin, err := template.New("").Funcs(funcMap).ParseFiles(
+		"templates/layout.html",
+		"templates/partials/composer.html",
+		"templates/admin.html",
+	)
+	if err != nil {
+		return nil, err
+	}
 	tmplLogin, err := template.ParseFiles("templates/login.html")
 	if err != nil {
 		return nil, err
@@ -331,6 +393,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		tmplProfile:       tmplProfile,
 		tmplNotifications: tmplNotifications,
 		tmplSettings:      tmplSettings,
+		tmplAdmin:         tmplAdmin,
 		tmplLogin:         tmplLogin,
 		tmpl404:           tmpl404,
 		tmpl500:           tmpl500,
@@ -687,6 +750,51 @@ func (h *UIHandler) HandleSettingsPage(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplSettings.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		slog.Error("render settings page", "err", err)
+	}
+}
+
+// HandleAdminStats renders the owner-only stats dashboard. RequireAdmin has already
+// verified the caller is the ADMIN_DID owner and seeded the DID/session ID, so this
+// handler does no further gating. Both stats queries are single-pass aggregates.
+func (h *UIHandler) HandleAdminStats(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+
+	user, err := h.queries.GetUserByDID(c.Request.Context(), did)
+	if err != nil {
+		slog.Error("GetUserByDID in admin stats", "did", did, "err", err)
+		h.Handle500(c)
+		return
+	}
+
+	stats, err := h.queries.GetAdminStats(c.Request.Context())
+	if err != nil {
+		slog.Error("GetAdminStats", "err", err)
+		h.Handle500(c)
+		return
+	}
+	content, err := h.queries.GetContentStats(c.Request.Context())
+	if err != nil {
+		slog.Error("GetContentStats", "err", err)
+		h.Handle500(c)
+		return
+	}
+
+	data := AdminStatsData{
+		LayoutData:     h.buildLayoutBase(c, did, sessionID, user),
+		TotalUsers:     stats.TotalUsers,
+		NewToday:       stats.NewToday,
+		NewThisWeek:    stats.NewThisWeek,
+		DAU:            stats.Dau,
+		WAU:            stats.Wau,
+		MAU:            stats.Mau,
+		TotalTemplates: content.TotalTemplates,
+		TotalPosts:     content.TotalPosts,
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplAdmin.ExecuteTemplate(c.Writer, "layout", data); err != nil {
+		slog.Error("render admin stats page", "err", err)
 	}
 }
 

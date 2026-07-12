@@ -20,6 +20,7 @@ Set these in the Railway service's **Variables** panel before deploying.
 | `OAUTH_REDIRECT_URL` | Must be exactly `https://draftsky.social/auth/callback`       |
 | `APP_ENV`          | `production`                                                     |
 | `PORT`             | Set automatically by Railway — do not override                   |
+| `ADMIN_DID`        | Optional — the owner's DID (e.g. `did:plc:...`). Gates `GET /admin/stats`; unset leaves the route 404ing for everyone |
 
 ### Generating SESSION_SECRET
 
@@ -50,6 +51,11 @@ migrate -path ./migrations -database "$DATABASE_URL" up
 
 Replace `$DATABASE_URL` with the Railway PostgreSQL connection string (use the
 **External** URL when running from your local machine).
+
+> **This deploy:** migration `000008_add_last_seen_to_users` adds the `last_seen_at`
+> column that powers the admin activity stats (DAU/WAU/MAU). It MUST be run against
+> production on this deploy or the auth middleware's activity-touch write will error
+> (logged, non-fatal) and `/admin/stats` will 500.
 
 ---
 

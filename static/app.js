@@ -749,7 +749,13 @@ async function doUndoRepost(el) {
 // hls.js is self-hosted from our own origin (static/vendor/hls.min.js, v1.6.16).
 // A third-party CDN was a reliability liability (outage = no video) and got blocked
 // by Brave Shields / ad-blockers; serving from 'self' sidesteps both.
-const HLS_JS_SRC = '/static/vendor/hls.min.js';
+// Content-hash cache-busting: the layout emits the file's hash in a <meta> tag (it
+// can't ?v= a <script> we inject dynamically), so we append it here. Falls back to
+// the bare URL if the meta is absent.
+const HLS_JS_SRC = (() => {
+    const v = document.querySelector('meta[name="hls-version"]')?.content;
+    return v ? '/static/vendor/hls.min.js?v=' + v : '/static/vendor/hls.min.js';
+})();
 let _hlsLoaderPromise = null;
 
 // loadHlsJs injects the hls.js <script> on first call and caches the promise so

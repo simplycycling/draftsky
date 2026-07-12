@@ -5,9 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ .CSRFToken }}">
+    <!-- hls.min.js is loaded lazily by app.js; expose its content hash so app.js can
+         cache-bust it too (it's not referenced by a <script>/<link> here). -->
+    <meta name="hls-version" content="{{ assetVersion "/static/vendor/hls.min.js" }}">
     <title>DraftSky</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{ assetVersion "/static/style.css" }}">
     <!-- HTMX self-hosted (v2.0.4) — no unpkg dependency; same-origin so no SRI needed. -->
     <script src="/static/vendor/htmx.min.js"></script>
 </head>
@@ -86,7 +89,7 @@
 
 {{template "composer" .}}
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{ assetVersion "/static/app.js" }}"></script>
 </body>
 </html>
 {{end}}

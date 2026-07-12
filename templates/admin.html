@@ -1,0 +1,33 @@
+{{define "content"}}
+<div class="settings-page">
+
+    <div class="settings-header">
+        <h1 class="page-title">Admin — Stats</h1>
+    </div>
+
+    <section class="settings-section">
+        <h2 class="section-heading">Users</h2>
+        <div class="admin-stat-grid">
+            <div class="admin-stat"><span class="admin-stat-num">{{.TotalUsers}}</span><span class="admin-stat-label">Total users</span></div>
+            <div class="admin-stat"><span class="admin-stat-num">{{.NewToday}}</span><span class="admin-stat-label">New today</span></div>
+            <div class="admin-stat"><span class="admin-stat-num">{{.NewThisWeek}}</span><span class="admin-stat-label">New this week</span></div>
+        </div>
+    </section>
+
+    <section class="settings-section">
+        <h2 class="section-heading">Activity</h2>
+        <div class="admin-stat-grid">
+            <div class="admin-stat"><span class="admin-stat-num">{{.DAU}}</span><span class="admin-stat-label">DAU (1d)</span></div>
+            <div class="admin-stat"><span class="admin-stat-num">{{.WAU}}</span><span class="admin-stat-label">WAU (7d)</span></div>
+            <div class="admin-stat"><span class="admin-stat-num">{{.MAU}}</span><span class="admin-stat-label">MAU (30d)</span></div>
+        </div>
+        <p class="section-subtitle">Active = has a last_seen_at within the window. Rows created before instrumentation shipped have no last_seen_at until the user next visits.</p>
+    </section>
+
+    <section class="settings-section">
+        <h2 class="section-heading">Content</h2>
+        <p class="section-subtitle">{{.TotalTemplates}} templates · {{.TotalPosts}} posts recorded in post_history</p>
+    </section>
+
+</div>
+{{end}}

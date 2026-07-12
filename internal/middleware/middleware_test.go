@@ -230,6 +230,84 @@ func TestRequirePaidPlan_FreeBlocked(t *testing.T) {
 	}
 }
 
+// adminRouter mounts RequireAdmin on /admin/stats with the given admin DID, returning
+// 200 from the handler on success.
+func adminRouter(secret []byte, adminDID string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/admin/stats", middleware.RequireAdmin(secret, adminDID), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	return r
+}
+
+func TestRequireAdmin_AdminDIDPasses(t *testing.T) {
+	secret := []byte("admin-secret")
+	adminDID := "did:plc:owner"
+	r := adminRouter(secret, adminDID)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/admin/stats", nil)
+	req.AddCookie(&http.Cookie{
+		Name:  auth.SessionCookieName,
+		Value: buildTestCookie(t, secret, adminDID, "sess_admin"),
+	})
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("admin DID: want 200, got %d", w.Code)
+	}
+}
+
+func TestRequireAdmin_OtherDID404s(t *testing.T) {
+	secret := []byte("admin-secret")
+	r := adminRouter(secret, "did:plc:owner")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/admin/stats", nil)
+	// A valid session — but for a different, non-owner DID.
+	req.AddCookie(&http.Cookie{
+		Name:  auth.SessionCookieName,
+		Value: buildTestCookie(t, secret, "did:plc:someoneelse", "sess_x"),
+	})
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("non-owner DID: want 404 (route hidden), got %d", w.Code)
+	}
+}
+
+func TestRequireAdmin_NoSession404s(t *testing.T) {
+	secret := []byte("admin-secret")
+	r := adminRouter(secret, "did:plc:owner")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/admin/stats", nil)
+	r.ServeHTTP(w, req) // no cookie
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("no session: want 404 (not a redirect), got %d", w.Code)
+	}
+}
+
+func TestRequireAdmin_UnsetAdminDID404s(t *testing.T) {
+	secret := []byte("admin-secret")
+	r := adminRouter(secret, "") // ADMIN_DID unset
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/admin/stats", nil)
+	// Even a valid session must not reach the handler when no admin is configured.
+	req.AddCookie(&http.Cookie{
+		Name:  auth.SessionCookieName,
+		Value: buildTestCookie(t, secret, "did:plc:owner", "sess_a"),
+	})
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("unset ADMIN_DID: want 404, got %d", w.Code)
+	}
+}
+
 func TestRequireAuth_WrongSecretRejected(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	signingSecret := []byte("signing-secret")

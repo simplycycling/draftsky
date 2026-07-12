@@ -36,6 +36,62 @@ func (q *Queries) CreatePostHistory(ctx context.Context, arg CreatePostHistoryPa
 	return i, err
 }
 
+const getAdminStats = `-- name: GetAdminStats :one
+SELECT
+    count(*)                                                                  AS total_users,
+    count(*) FILTER (WHERE created_at   >= date_trunc('day', now()))          AS new_today,
+    count(*) FILTER (WHERE created_at   >= now() - interval '7 days')         AS new_this_week,
+    count(*) FILTER (WHERE last_seen_at >= now() - interval '1 day')          AS dau,
+    count(*) FILTER (WHERE last_seen_at >= now() - interval '7 days')         AS wau,
+    count(*) FILTER (WHERE last_seen_at >= now() - interval '30 days')        AS mau
+FROM users
+`
+
+type GetAdminStatsRow struct {
+	TotalUsers  int64
+	NewToday    int64
+	NewThisWeek int64
+	Dau         int64
+	Wau         int64
+	Mau         int64
+}
+
+// Single-pass user metrics for the admin dashboard. FILTER aggregates keep it to one
+// scan of users with no per-user loop. "today" is the current calendar day; "this
+// week" and the activity windows are trailing intervals off now().
+func (q *Queries) GetAdminStats(ctx context.Context) (GetAdminStatsRow, error) {
+	row := q.db.QueryRow(ctx, getAdminStats)
+	var i GetAdminStatsRow
+	err := row.Scan(
+		&i.TotalUsers,
+		&i.NewToday,
+		&i.NewThisWeek,
+		&i.Dau,
+		&i.Wau,
+		&i.Mau,
+	)
+	return i, err
+}
+
+const getContentStats = `-- name: GetContentStats :one
+SELECT
+    (SELECT count(*) FROM templates)     AS total_templates,
+    (SELECT count(*) FROM post_history)  AS total_posts
+`
+
+type GetContentStatsRow struct {
+	TotalTemplates int64
+	TotalPosts     int64
+}
+
+// Bonus one-liners for the admin dashboard: lifetime templates + recorded posts.
+func (q *Queries) GetContentStats(ctx context.Context) (GetContentStatsRow, error) {
+	row := q.db.QueryRow(ctx, getContentStats)
+	var i GetContentStatsRow
+	err := row.Scan(&i.TotalTemplates, &i.TotalPosts)
+	return i, err
+}
+
 const getRecentTagsByUser = `-- name: GetRecentTagsByUser :many
 SELECT tag::text AS tag, MAX(ph.created_at) AS last_used
 FROM post_history ph, unnest(ph.hashtags) AS tag
@@ -71,7 +127,7 @@ func (q *Queries) GetRecentTagsByUser(ctx context.Context, userID pgtype.Int4) (
 }
 
 const getUserByDID = `-- name: GetUserByDID :one
-SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar FROM users WHERE did = $1
+SELECT id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar, last_seen_at FROM users WHERE did = $1
 `
 
 func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
@@ -88,8 +144,25 @@ func (q *Queries) GetUserByDID(ctx context.Context, did string) (User, error) {
 		&i.Plan,
 		&i.Theme,
 		&i.Avatar,
+		&i.LastSeenAt,
 	)
 	return i, err
+}
+
+const touchUserLastSeen = `-- name: TouchUserLastSeen :exec
+UPDATE users
+SET last_seen_at = now()
+WHERE did = $1
+  AND (last_seen_at IS NULL OR last_seen_at < now() - interval '1 hour')
+`
+
+// Best-effort activity stamp. The staleness gate lives IN the SQL so concurrent
+// requests within the same hour all no-op (WHERE matches no row) instead of racing
+// to redundant writes — the caller fires this in a detached goroutine on every
+// authenticated request without a preceding SELECT to decide whether to write.
+func (q *Queries) TouchUserLastSeen(ctx context.Context, did string) error {
+	_, err := q.db.Exec(ctx, touchUserLastSeen, did)
+	return err
 }
 
 const updateUserAvatar = `-- name: UpdateUserAvatar :exec
@@ -108,7 +181,7 @@ func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarPara
 
 const updateUserTheme = `-- name: UpdateUserTheme :one
 UPDATE users SET theme = $2 WHERE did = $1
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar, last_seen_at
 `
 
 type UpdateUserThemeParams struct {
@@ -130,6 +203,7 @@ func (q *Queries) UpdateUserTheme(ctx context.Context, arg UpdateUserThemeParams
 		&i.Plan,
 		&i.Theme,
 		&i.Avatar,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
@@ -140,7 +214,7 @@ SET access_token  = $2,
     refresh_token = $3,
     token_expiry  = $4
 WHERE did = $1
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar, last_seen_at
 `
 
 type UpdateUserTokensParams struct {
@@ -169,6 +243,7 @@ func (q *Queries) UpdateUserTokens(ctx context.Context, arg UpdateUserTokensPara
 		&i.Plan,
 		&i.Theme,
 		&i.Avatar,
+		&i.LastSeenAt,
 	)
 	return i, err
 }
@@ -181,7 +256,7 @@ ON CONFLICT (did) DO UPDATE SET
     access_token  = EXCLUDED.access_token,
     refresh_token = EXCLUDED.refresh_token,
     token_expiry  = EXCLUDED.token_expiry
-RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar
+RETURNING id, did, handle, access_token, refresh_token, token_expiry, created_at, plan, theme, avatar, last_seen_at
 `
 
 type UpsertUserParams struct {
@@ -212,6 +287,7 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.Plan,
 		&i.Theme,
 		&i.Avatar,
+		&i.LastSeenAt,
 	)
 	return i, err
 }

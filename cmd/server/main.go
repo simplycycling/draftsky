@@ -53,6 +53,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ADMIN_DID gates GET /admin/stats. Optional: unset leaves the route 404ing for
+	// everyone (RequireAdmin treats an empty admin DID as "no admin").
+	adminDID := os.Getenv("ADMIN_DID")
+	if adminDID == "" {
+		slog.Info("ADMIN_DID not set — /admin/stats is disabled (404 for all)")
+	}
+
 	// --- Database ---
 	ctx := context.Background()
 
@@ -136,8 +143,16 @@ func main() {
 	secure := appEnv == "production"
 	authHandler := auth.NewHandler(oauthApp, queries, secret, secure)
 
-	// Static assets
-	r.Static("/static", "./static")
+	// Static assets. Now that every template reference is content-hash cache-busted
+	// (?v=<hash>, see computeAssetVersions), a given URL's bytes never change, so we
+	// can safely serve /static with a one-year immutable cache. This replaces the
+	// previous browser-default heuristic caching, which was the root cause of the
+	// stale-app.js phantom blocker (Gotcha 10): a deploy bumps the ?v= hash, minting
+	// a fresh URL the browser must re-fetch, while unchanged assets stay fully cached.
+	staticGroup := r.Group("/static", func(c *gin.Context) {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	})
+	staticGroup.Static("/", "./static")
 
 	// Well-known root files
 	r.GET("/robots.txt", func(c *gin.Context) {
@@ -182,7 +197,12 @@ func main() {
 	// Authenticated web UI routes. RequireCSRF runs after RequireSession (which
 	// populates the session ID it verifies against) and only guards mutating
 	// methods, so the GET routes below are unaffected.
-	web := r.Group("/", middleware.RequireSession(secret), middleware.RequireCSRF(secret))
+	// /admin/stats is owner-only. RequireAdmin is self-contained (validates the
+	// session itself) and 404s every non-owner case, so it is NOT mounted under the
+	// RequireSession web group — a redirect would advertise the route's existence.
+	r.GET("/admin/stats", middleware.RequireAdmin(secret, adminDID), uiH.HandleAdminStats)
+
+	web := r.Group("/", middleware.RequireSession(secret), middleware.TouchLastSeen(queries), middleware.RequireCSRF(secret))
 	web.GET("", uiH.HandleHome)
 	web.GET("/thread", uiH.HandleThreadPage)
 	web.GET("/notifications", uiH.HandleNotificationsPage)
@@ -199,7 +219,7 @@ func main() {
 	// Protected route group — all routes added here require a valid session cookie.
 	// RequireCSRF runs after RequireAuth and guards only mutating methods, so the
 	// GET feed routes are unaffected.
-	api := r.Group("/api", middleware.RequireAuth(secret), middleware.RequireCSRF(secret))
+	api := r.Group("/api", middleware.RequireAuth(secret), middleware.TouchLastSeen(queries), middleware.RequireCSRF(secret))
 
 	postH := handlers.NewPostHandler(queries, poster)
 	api.POST("/post", postH.HandleCreatePost)
