@@ -323,6 +323,8 @@ draftsky/
 
 ## Gotchas (hard-won — read before writing code)
 
+Append-only list — check the current highest number before adding.
+
 1. **`#ZgotmplZ` on AT URIs in data attributes.** Go's html/template `attrType()`
    strips the `data-` prefix from custom attributes and treats any remaining name
    containing "uri"/"url"/"src" as a URL context. `at://` is not an allowlisted scheme,
@@ -378,6 +380,37 @@ draftsky/
     until a side effect (error rendering, input clearing) never runs. Use delegated
     `htmx:*` listeners in app.js instead (one `htmx:afterRequest` dispatcher keyed on
     `evt.detail.elt`). Plain-JSON `hx-vals` is fine; `hx-vals="js:..."` would not be.
+18. **`putRecord` + indigo's non-omitempty `SwapRecord` = `InvalidSwap`.** indigo's
+    `RepoPutRecord_Input.SwapRecord` is `*string` with **no** `omitempty`, so a nil value
+    serialises as `"swapRecord": null`. In AT Protocol a *null* swapRecord is not "skip
+    the check" — it asserts *the record does not currently exist*. Updating an existing
+    record (e.g. `app.bsky.actor.profile/self` to edit a bio) therefore fails with
+    `HTTP 400 InvalidSwap: Record was at <cid>` — nothing is written, but the write is
+    rejected. Fix: on the get-then-put, capture the current record's CID from the
+    `getRecord` response and pass it as `SwapRecord` (a real compare-and-swap, which also
+    guards against clobbering avatar/banner blobs in a read→write race). Leave it nil only
+    for a genuine create (no record yet), where null="assert none exists" is correct. This
+    passed build, unit tests, and template-render tests — it only surfaced against a live
+    PDS (see Gotcha 16: async/external-API behaviour needs one real execution).
+19. **Test mutations touch only rows the test created.** A test that writes to a shared
+    database (templates, post_history, users) must confine every insert/update/delete to
+    rows it created in that same run, and destructive cleanup must match on the **id
+    captured at creation time**, never on a name/handle/other human-meaningful field.
+    Matching cleanup on a name (`DELETE ... WHERE name = 'Devils Game'`) will silently
+    wipe a real row a developer happens to have with that name; matching on the captured
+    id (`WHERE id = <id returned by the create>`) cannot. Capture the id the create
+    returns, use it for teardown, and scope every assertion to it.
+20. **A card-level click guard self-blocks when reused on a nested card.** The outer
+    `.post-card` navigates via `navigateToThread`, whose blocklist (`evt.target.closest`)
+    includes `.quoted-card` and `.post-video` so clicks *inside* a quote/video don't
+    navigate the OUTER card. Wiring that SAME function on the nested `.quoted-card`'s own
+    onclick made every click inside it match `.quoted-card` (ancestor-or-self) and return
+    early — the quoted-card click-through was dead for all quotes. A guard that names the
+    handler's own container must not be reused as that container's own handler. Nested
+    cards get their own nav fn (`navigateToQuoted`) with no self-referential entry; rely
+    on the interactive children's `stopPropagation` to keep them out of it, not on a
+    blocklist. (Verified with a byte-identical-function DOM harness — this is a
+    synchronous selector bug, so a real click, not a code-walk, is what proves it.)
 
 ---
 
@@ -458,13 +491,19 @@ in Docker (`docker start draftsky-dev-db`).
    `FeedSearchPosts` has an `author` param (handle or DID, resolved server-side) that
    combines with `tag`, so the by-author half shipped (no deferral). "Mute #tag"
    remains DEFERRED post-GA (needs a mutes table + filtering on every feed path).
-7. **Quoted-card click-through diagnosis + fix** — observed dead on a post with an
-   external link (GIF) above a quoted card containing a video thumbnail: clicking the
-   quoted card did not navigate to the quoted thread. Click-through was built and
-   verified in the quote session, so this is likely a regression or a layering issue
-   (video-thumb-inside-quote or link-above-quote). Diagnose in dev tools FIRST, then
-   fix. If diagnosis shows it's not a regression but a per-composition gap, fix the
-   composition. Regressions don't ship to GA.
+7. **Quoted-card click-through diagnosis + fix** — ✅ **DONE**. Root cause was NOT
+   composition-specific and NOT stale cache: the quoted card reused the outer card's
+   `navigateToThread`, whose blocklist contains `.quoted-card` / `.post-video` (there
+   to stop clicks *inside* a quote from navigating the OUTER card). Reused on the
+   quote's own handler, every click self-matched `.quoted-card` (and quoted videos
+   matched `.post-video`) → the guard returned early → click-through was dead for ALL
+   quotes since `f7634e8` (born broken: that commit added both the nav onclick and the
+   `.quoted-card` blocklist entry). Fix: dedicated `navigateToQuoted` (no self-block;
+   only a defensive `a, button` guard — the quote's interactive children already
+   stopPropagation), wired on `.quoted-card`. Quoted video thumb now navigates to the
+   quoted thread ("play it there"). Verified failure + fixed click-map (quoted text /
+   quoted video / quoted images / quoted link / outer body / outer link → correct
+   destinations) with a byte-identical-function DOM harness. See Gotcha 18.
 8. **Usage instrumentation + admin stats** — migration: `last_seen_at TIMESTAMPTZ` on
    `users`, touched by the auth middleware in a detached goroutine, throttled (write
    only when the stored value is >1h stale — not a DB write per request). Admin page:

@@ -112,7 +112,7 @@
         {{else}}
         <div class="quoted-card"
              data-quoted-uri="{{safeAtURI .Quoted.URI}}"
-             onclick="event.stopPropagation(); navigateToThread(event, this.dataset.quotedUri)"
+             onclick="event.stopPropagation(); navigateToQuoted(event, this.dataset.quotedUri)"
              style="cursor:pointer">
             <div class="quoted-header" data-profile-handle="{{.Quoted.Author.Handle}}"
                  onclick="navigateToProfile(event, this.dataset.profileHandle)" style="cursor:pointer">

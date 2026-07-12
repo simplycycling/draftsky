@@ -577,13 +577,32 @@ document.addEventListener('keydown', e => {
 // --- Thread navigation ---
 
 // Navigates to the thread view for a post card click, unless the click landed
-// on an interactive element that has its own behaviour.
+// on an interactive element that has its own behaviour. .quoted-card and
+// .post-video are in the blocklist so that clicking a quote (or a playable
+// video) inside the OUTER card doesn't also navigate the outer card — the quote
+// has its own navigateToQuoted handler, the video its own play handler.
 function navigateToThread(evt, uri) {
     if (!uri) return;
     const blocked = evt.target.closest(
         '.post-count, .post-hashtag, .link-card, .post-image-link, .quoted-card, .post-video, .post-author, a, button'
     );
     if (blocked) return;
+    window.location.href = '/thread?uri=' + encodeURIComponent(uri);
+}
+
+// navigateToQuoted opens the QUOTED post's own thread when its card is clicked.
+// It deliberately does NOT reuse navigateToThread: that function's blocklist
+// contains .quoted-card / .post-video precisely to guard the OUTER card, and
+// reusing it here made every click inside a quote match .quoted-card (or a
+// quoted video match .post-video) and self-block — the quoted-card click-through
+// was dead for all quotes. The quote's genuinely interactive children (author
+// header → navigateToProfile, quoted images, quoted link cards) already
+// stopPropagation, so they never reach here; the non-playing quoted video thumb
+// SHOULD reach here and navigate ("play it there"). Only a defensive a/button
+// guard remains for any future child that forgets to stopPropagation.
+function navigateToQuoted(evt, uri) {
+    if (!uri) return;
+    if (evt.target.closest('a, button')) return;
     window.location.href = '/thread?uri=' + encodeURIComponent(uri);
 }
 
