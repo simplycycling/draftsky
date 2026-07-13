@@ -251,6 +251,16 @@ func buildHashtagFacets(text string) []*appbsky.RichtextFacet {
 func buildFacets(ctx context.Context, text string, resolve handleResolver) []*appbsky.RichtextFacet {
 	facets := buildHashtagFacets(text)
 	facets = append(facets, buildMentionFacets(ctx, text, resolve)...)
+
+	// Links are detected last: a token already claimed as a hashtag or mention
+	// must never also become a link ("@rogersherman.com" stays a mention,
+	// "#draftsky.social" stays a tag), so their byte ranges are excluded.
+	exclude := make([]ByteRange, len(facets))
+	for i, f := range facets {
+		exclude[i] = ByteRange{Start: int(f.Index.ByteStart), End: int(f.Index.ByteEnd)}
+	}
+	facets = append(facets, buildLinkFacets(text, exclude)...)
+
 	sort.Slice(facets, func(i, j int) bool {
 		return facets[i].Index.ByteStart < facets[j].Index.ByteStart
 	})

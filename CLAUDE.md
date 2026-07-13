@@ -442,6 +442,29 @@ Append-only list — check the current highest number before adding.
     blocked account errors upstream (server-enforced) and degrades to an empty feed. Muted-WORD
     filtering was likewise verified (a muted tag emptied its feed while a control tag stayed
     full, and exact-tag precision held: muting `bluejays` did not hide `#TorontoBlueJays`).
+23. **URLs need link facets or they post as dead text — and mention/link detection can
+    collide.** Bluesky renders URLs as links only when the post record carries an
+    `app.bsky.richtext.facet#link` facet; without one, a typed URL (`draftsky.social`)
+    posts as plain, unclickable text (found live). `buildLinkFacets`/`DetectLinks`
+    (`internal/bluesky/links.go`) mirror Bluesky's own composer (`@atproto/api`
+    `URL_REGEX` + `isValidDomain`; indigo ships no link helper): scheme URLs
+    (`https?://…`) and bare domains with optional path, boundary-anchored (start /
+    whitespace / `(`), trailing punctuation + one unmatched `)` stripped. A bare
+    domain's facet `uri` gets `https://` prepended while the **text stays as typed**.
+    Bare domains are TLD-validated against the full IANA list (`tlds.go`, the `tlds`
+    npm list Bluesky uses) so `photo.jpg`/`e.g` are not linkified. Two collisions to
+    respect: (a) a bare-domain matcher and the mention matcher both see
+    `@rogersherman.com` — mentions/hashtags are detected FIRST and their byte ranges
+    excluded from link detection, and the `@`/`#` prefix is not a URL boundary char so
+    it never matches anyway (belt + suspenders); (b) the UI's *unanchored* hashtag
+    regex would match the `#anchor` inside `https://x.com/#anchor`, so `highlightFacets`
+    detects links FIRST and adds hashtags/mentions only when clear of a link range.
+    Feed URLs render as real `<a class="post-link" target=_blank
+    rel="noopener noreferrer nofollow" onclick=stopPropagation>` with the href built
+    from the same validated detection (validate → mark safe, Gotcha 1's spirit), never
+    raw text into an attribute. Facets stay byte-sorted in one slice; detection runs on
+    combined body+suffix. Live-verified 2026-07-13 (Gotcha 18 class): a posted URL
+    rendered clickable both in DraftSky's feed and on bsky.app.
 
 ---
 
@@ -511,6 +534,13 @@ in Docker (`docker start draftsky-dev-db`).
   now served `Cache-Control: public, max-age=31536000, immutable`. Ends the Gotcha 10
   (stale app.js) class of bug for end users: a deploy that changes an asset mints a fresh
   URL the browser must re-fetch, unchanged assets stay fully cached
+- URL link facets — outgoing posts now carry `app.bsky.richtext.facet#link` facets so
+  typed URLs render as real links on Bluesky (fixing dead-text URLs), and feed URLs
+  render as clickable `<a>` links in DraftSky. Scheme URLs + bare domains (TLD-validated
+  against the full IANA list), boundary-anchored, trailing-punctuation stripped, bare
+  domains get `https://` prepended (text unchanged); mention/hashtag ranges excluded so
+  `@handle.com` stays a mention. `DetectLinks` shared by the facet builder and feed
+  rendering; table tests + live-verified 2026-07-13. See Gotcha 23
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect

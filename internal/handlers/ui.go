@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/rsherman/draftsky/internal/auth"
+	"github.com/rsherman/draftsky/internal/bluesky"
 	db "github.com/rsherman/draftsky/internal/db/sqlc"
 	"github.com/rsherman/draftsky/internal/feed"
 	"github.com/rsherman/draftsky/internal/middleware"
@@ -215,18 +216,43 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 		// handle that no longer resolves simply 404s at /profile, which is acceptable.
 		"highlightFacets": func(text, authorHandle string) template.HTML {
 			jsAuthor := template.JSEscapeString(authorHandle)
+			const (
+				kindHashtag = iota
+				kindMention
+				kindLink
+			)
 			type span struct {
 				start, end int
-				mention    bool
+				kind       int
+				href       string // links only; the validated http(s) URI
 			}
 			var spans []span
+
+			// Links are detected first (no exclusions) so a URL wins over an
+			// unanchored hashtag match inside it — the "#anchor" in
+			// "https://example.com/#anchor" stays part of the link, not a tag.
+			// Real hashtags/mentions never overlap a link (their '#'/'@' prefix
+			// is not a URL boundary char — see urlRe), so they are only added
+			// when clear of every detected link range.
+			links := bluesky.DetectLinks(text, nil)
+			for _, lm := range links {
+				spans = append(spans, span{start: lm.Start, end: lm.End, kind: kindLink, href: lm.URI})
+			}
+			addIfClear := func(start, end, kind int) {
+				for _, lm := range links {
+					if start < lm.End && lm.Start < end {
+						return
+					}
+				}
+				spans = append(spans, span{start: start, end: end, kind: kind})
+			}
 			for _, m := range uiHashtagRe.FindAllStringIndex(text, -1) {
-				spans = append(spans, span{start: m[0], end: m[1]})
+				addIfClear(m[0], m[1], kindHashtag)
 			}
 			for _, m := range uiMentionRe.FindAllStringSubmatchIndex(text, -1) {
 				// m[2]/m[3] bound capture group 1 — the "@handle", excluding the
 				// leading boundary whitespace.
-				spans = append(spans, span{start: m[2], end: m[3], mention: true})
+				addIfClear(m[2], m[3], kindMention)
 			}
 			sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
 
@@ -238,14 +264,24 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 				}
 				buf.WriteString(template.HTMLEscapeString(text[last:s.start]))
 				token := text[s.start:s.end]
-				if s.mention {
+				switch s.kind {
+				case kindMention:
 					handle := template.JSEscapeString(token[1:]) // strip '@', JS-escape
 					buf.WriteString(`<span class="post-mention" onclick="event.stopPropagation();navigateToProfile(event,'`)
 					buf.WriteString(handle)
 					buf.WriteString(`')">`)
 					buf.WriteString(template.HTMLEscapeString(token))
 					buf.WriteString(`</span>`)
-				} else {
+				case kindLink:
+					// href is a detection-validated http(s) URI, never raw text into an
+					// attribute; HTMLEscapeString guards the attribute and visible-text
+					// contexts (Gotcha 1's spirit: validate, then mark safe).
+					buf.WriteString(`<a class="post-link" href="`)
+					buf.WriteString(template.HTMLEscapeString(s.href))
+					buf.WriteString(`" target="_blank" rel="noopener noreferrer nofollow" onclick="event.stopPropagation()">`)
+					buf.WriteString(template.HTMLEscapeString(token))
+					buf.WriteString(`</a>`)
+				default: // kindHashtag
 					tag := template.JSEscapeString(token[1:]) // strip '#', JS-escape
 					buf.WriteString(`<span class="post-hashtag" onclick="event.stopPropagation();openHashtagMenu(event,'`)
 					buf.WriteString(tag)

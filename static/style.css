@@ -506,6 +506,19 @@ button {
     text-decoration: underline;
 }
 
+/* Inline URLs in post text — accent-coloured real links (target=_blank), matching
+   .post-hashtag/.post-mention affordance. stopPropagation on click keeps card
+   click-through working. */
+.post-link {
+    color: var(--color-accent);
+    text-decoration: none;
+    word-break: break-word;
+}
+
+.post-link:hover {
+    text-decoration: underline;
+}
+
 .post-meta {
     margin-left: 46px;
     display: flex;
