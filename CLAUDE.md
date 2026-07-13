@@ -616,6 +616,15 @@ in Docker (`docker start draftsky-dev-db`).
 After item 9: **GA**.
 
 ### Post-GA / longer term
+- **Multi-template posting** — select multiple templates per post. Chips UI
+  (selected templates as removable chips below the selector, reorderable by
+  selection order). Suffixes concatenate in SELECTION order, single space
+  between suffixes; the newline-awareness rule (Gotcha 4) applies only between
+  body and the first suffix. Tag-aware dedup across combined suffixes (first
+  occurrence wins — #NHL appears once even if two templates carry it), which
+  makes combination tag-aware rather than string concat. composerState gains a
+  suffixes[] input; counter counts the combined deduped result. No free-tier
+  interaction — the 5-template cap is on creation, not use (confirmed intent).
 - **Hashtag activity counter** (small) — when the post-submit hashtag feed appears,
   show per-tag stats from the already-fetched merged feed: post count and rough
   recency per tag (e.g. "#NJDevils: 47 posts in the last hour"). Answers "which of my
