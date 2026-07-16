@@ -220,7 +220,9 @@ Applied migrations: 000001_create_users, 000002_create_templates, 000003_add_pla
 ### Web UI (RequireSession — redirects to /login; HTMX partials)
 | Method | Path             | Description                                     |
 |--------|------------------|-------------------------------------------------|
-| GET    | /                | Three-column layout, Following feed on load     |
+| GET    | /                | Instant shell; feed/tabs/tags lazy-load on load |
+| GET    | /feed/tabs       | HTMX lazy partial — saved-feeds tab bar         |
+| GET    | /feed/recent-tags| HTMX lazy partial — right-rail recent tags      |
 | GET    | /feed/following  | HTMX partial — Following feed                   |
 | GET    | /feed/hashtags   | HTMX partial — merged hashtag feed              |
 | GET    | /templates       | Template management page                        |
@@ -465,6 +467,24 @@ Append-only list — check the current highest number before adding.
     raw text into an attribute. Facets stay byte-sorted in one slice; detection runs on
     combined body+suffix. Live-verified 2026-07-13 (Gotcha 18 class): a posted URL
     rendered clickable both in DraftSky's feed and on bsky.app.
+24. **Concurrent `ResumeSession` races the single-use OAuth refresh token.** AT Protocol
+    refresh tokens are ROTATED on every refresh (single-use). If N goroutines/requests
+    call `oauthApp.ResumeSession` for the same session while the access token is expired,
+    they each try to refresh: the first rotates the token and the losers fail with
+    `HTTP 400 invalid_grant: refresh token rotated concurrently` (preceded by benign
+    `use_dpop_nonce` retries — those are normal DPoP, not the failure). The async home
+    shell made this acute and VISIBLE: three regions (`/feed/tabs`, `/feed/following`,
+    the immediate unread poll) fire as separate concurrent requests on cold load, so a
+    just-expired token spuriously degraded one of them ("feeds unavailable"). The old
+    synchronous home had the same race (buildLayoutBase resumed in two concurrent
+    goroutines) but hid it — no note, and the later sequential feed fetch used the
+    freshly-rotated token. Fix: `feed.Client.resumeAPIClient` serialises per session with
+    a `sync.Map[sessionID]*sync.Mutex`, holding the lock ONLY across `ResumeSession` (the
+    refresh point) and releasing before the XRPC call — so the first resumer refreshes,
+    the rest see a valid token and skip it, and the actual feed fetches still run
+    concurrently. Only surfaces against a live PDS with an expired token (Gotcha 16
+    class); the mutex map grows unbounded like the rate limiter (same tech-debt bucket).
+    The `bluesky.Poster` resume path is not yet serialised (posting isn't self-concurrent).
 
 ---
 
@@ -489,6 +509,20 @@ in Docker (`docker start draftsky-dev-db`).
 ## Status & Roadmap
 
 ### Shipped (live at www.draftsky.social, private beta)
+- Async home shell (PDS-degradation resilience) — `GET /` renders INSTANTLY with zero
+  upstream calls: `HandleHome` uses a pure `buildShellLayout` (no feed client, so
+  zero-upstream is structural, not runtime), and the tab bar, centre feed, and
+  recent-tags rail are each an HTMX lazy region (`hx-trigger="load"` → `/feed/tabs`,
+  `/feed/following`, `/feed/recent-tags`) that shows a CSS skeleton
+  (prefers-reduced-motion aware) then its content or a styled "Bluesky isn't responding"
+  notice with a working Retry button. Page-blocking feed/chrome fetches fail fast at 6s;
+  the tab bar degrades to Following-only + a note. `createRecord` retries once after 2s
+  on transient errors (never on 4xx — double-post guard via `atclient.APIError`
+  StatusCode) with a 10s per-attempt budget; the composer maps a 502 to "your draft is
+  safe" and preserves state; the unread poll fires immediately on load. Fixes the
+  2026-07-15 incident (17-20s home render during PDS TLS timeouts). Also serialised the
+  per-session OAuth token refresh (Gotcha 24). Live-verified 2026-07-16 (instant shell +
+  skeletons + fault-injected notices + Retry re-fetch + restore). See Gotchas 16, 24.
 - AT Protocol OAuth login, PostgreSQL-backed OAuth store
 - Template CRUD with validation (100/250 rune limits) + live character counters
 - Posting with template suffix, correct facets, newline-aware suffix placement

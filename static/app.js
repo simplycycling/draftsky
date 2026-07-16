@@ -253,7 +253,15 @@ async function submitPost() {
             }
         } else {
             const data = await res.json().catch(() => ({}));
-            showComposerError(data.error || 'Post failed. Please try again.');
+            // 502 from our handler means the post reached DraftSky fine but Bluesky's
+            // PDS did not respond (createRecord timed out, even after the one server
+            // retry). The composer is left untouched — textarea, template, reply/quote
+            // context all intact — so the user can retry without retyping. Validation
+            // errors (400/409/etc.) keep their own specific message.
+            const msg = res.status === 502
+                ? "Bluesky isn't responding — your draft is safe, try again in a moment."
+                : (data.error || 'Post failed. Please try again.');
+            showComposerError(msg);
             btn.disabled = false;
             btn.textContent = 'Post';
         }
@@ -1374,10 +1382,13 @@ async function pollUnreadCount() {
 }
 
 // Start polling only on authenticated pages (those with the notifications nav link).
-// No immediate poll on load: the server already rendered the correct count. Fires
-// an immediate poll when the tab becomes visible so a returning user sees fresh state.
+// Fires an immediate poll on load: the home shell no longer server-renders the unread
+// count (it makes zero upstream calls), so the badge starts empty and this first poll
+// populates it rather than leaving it blank for up to 60s. On pages the server did
+// render the count, the immediate poll simply reconciles. Also polls on tab re-focus.
 (function initNotificationPolling() {
     if (!document.querySelector('.nav-link-notifications')) return;
+    pollUnreadCount();
     notifPollTimer = setInterval(pollUnreadCount, 60000);
     document.addEventListener('visibilitychange', function() {
         if (!document.hidden) pollUnreadCount();

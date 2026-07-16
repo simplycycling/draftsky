@@ -1,20 +1,32 @@
 {{define "feed"}}
 {{template "feed-controls" .}}
-{{if .FeedPage}}
-{{if .FeedPage.Posts}}
+{{if .FeedError}}
+{{template "feed-notice" .}}
+{{else if and .FeedPage .FeedPage.Posts}}
 <ul id="post-list" class="post-list">
     {{template "feed-more" .}}
 </ul>
-{{else}}
+{{else if .FeedPage}}
 <div class="feed-empty">
     <p class="muted-text">No posts yet. Follow some accounts to see their posts here.</p>
 </div>
-{{end}}
 {{else}}
 <div class="feed-empty">
     <p class="muted-text">Feed unavailable. Please try again.</p>
 </div>
 {{end}}
+{{end}}
+
+{{/* Shown when a feed's upstream fetch failed (timeout/connection/5xx) — as opposed to
+     a successful empty result, which keeps the "no posts yet" message above. The Retry
+     button re-runs the same fetch into #feed-root. */}}
+{{define "feed-notice"}}
+<div class="feed-notice" role="status">
+    <p class="feed-notice-title">Bluesky isn&rsquo;t responding right now</p>
+    <p class="feed-notice-body">DraftSky is fine &mdash; the network is having a moment.</p>
+    <button type="button" class="btn-retry"
+            hx-get="{{.RetryURL}}" hx-target="#feed-root" hx-swap="innerHTML">Retry</button>
+</div>
 {{end}}
 
 {{define "feed-more"}}

@@ -31,6 +31,13 @@ import (
 
 const uiFeedLimit = 20
 
+// uiFeedFetchTimeout bounds a page-blocking feed/chrome fetch (the lazy home
+// partials). The degradation UI makes a fast fail cheap — a skeleton flips to a
+// "Bluesky isn't responding" notice with a Retry button — so these fail at ~6s
+// rather than hanging, instead of the PDS client's longer default. (createRecord,
+// where a post is worth waiting for, keeps its own longer budget — see bluesky.)
+const uiFeedFetchTimeout = 6 * time.Second
+
 var uiHashtagRe = regexp.MustCompile(`#[^\s#<>&"']+`)
 
 // uiMentionRe matches @-mentions of domain-form handles for display highlighting.
@@ -81,6 +88,16 @@ type LayoutData struct {
 	// getPreferences. Feed-partial handlers, which don't build the full layout, fetch
 	// muted words on their own via mutedWordsFor.
 	MutedWords []feed.MutedWord
+	// LazyChrome is set only by the shell-only home handler. When true, layout.html
+	// renders the tab bar and recent-tags rail as empty HTMX lazy regions (hx-get on
+	// load) instead of server-rendering them, so GET / responds instantly with no
+	// upstream (PDS) calls. Every other page leaves it false and renders the chrome
+	// synchronously from SavedFeeds/RecentTags exactly as before.
+	LazyChrome bool
+	// TabsDegraded is set by the /feed/tabs partial when its getPreferences fetch
+	// failed: the tab bar falls back to Following-only and renders a small note.
+	TabsDegraded bool
+
 	// Feed state
 	FeedPage      *feed.FeedPage
 	FeedType      string   // "following" | "hashtag" | "custom"
@@ -88,6 +105,12 @@ type LayoutData struct {
 	FeedAuthor    string   // when set on a hashtag feed: "#tag by @author" (handle or DID)
 	FeedCustomURI string   // AT URI of the active custom feed (FeedType=="custom")
 	SentinelURL   string   // next-page URL embedded in the scroll sentinel
+	// FeedError marks that the feed's upstream fetch failed (timeout/connection/5xx —
+	// as opposed to a successful empty result). The feed partial then renders the
+	// "Bluesky isn't responding" notice with a Retry button targeting RetryURL,
+	// instead of the misleading "no posts yet" empty state.
+	FeedError bool
+	RetryURL  string // hx-get URL the failure notice's Retry button re-triggers
 }
 
 // TemplatesPageData is the data envelope for the templates management page.
@@ -353,6 +376,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplHome, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/partials/post_card.html",
 		"templates/partials/feed.html",
 		"templates/partials/feed_controls.html",
@@ -364,6 +388,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplTemplates, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/partials/template_row.html",
 		"templates/templates.html",
 	)
@@ -373,6 +398,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplThread, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/partials/post_card.html",
 		"templates/thread.html",
 	)
@@ -382,6 +408,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplProfile, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/partials/post_card.html",
 		"templates/partials/feed.html",
 		"templates/partials/feed_controls.html",
@@ -393,6 +420,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplNotifications, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/partials/notification_row.html",
 		"templates/notifications.html",
 	)
@@ -402,6 +430,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplSettings, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/settings.html",
 	)
 	if err != nil {
@@ -410,6 +439,7 @@ func NewUIHandler(queries *db.Queries, secret []byte, feedClient *feed.Client) (
 	tmplAdmin, err := template.New("").Funcs(funcMap).ParseFiles(
 		"templates/layout.html",
 		"templates/partials/composer.html",
+		"templates/partials/chrome.html",
 		"templates/admin.html",
 	)
 	if err != nil {
@@ -495,6 +525,18 @@ func (h *UIHandler) HandleRoadmapPage(c *gin.Context) {
 
 // HandleHome renders the full three-column layout with the Following feed pre-loaded.
 // RequireSession middleware ensures only authenticated users reach this handler.
+// HandleHome renders the home page shell INSTANTLY, making no upstream (Bluesky/PDS)
+// calls of its own. Its only I/O is the local GetUserByDID lookup. The three
+// upstream-dependent regions — the saved-feeds tab bar, the Following feed, and the
+// recent-tags rail — are each rendered as an empty HTMX lazy region that fetches its
+// own content on load (/feed/tabs, /feed/following, /feed/recent-tags). The unread
+// badge starts hidden and is filled by the client's immediate first poll.
+//
+// This is the fix for the 2026-07-15 incident: when the PDS was slow (TLS handshake
+// timeouts), the old synchronous home handler (buildLayoutBase's getPreferences +
+// getUnreadCount, plus the Following fetch) made the page take 17-20s to first byte.
+// The shell now paints immediately and each region shows a skeleton, then either its
+// content or a "Bluesky isn't responding" notice — the degradation has a face.
 func (h *UIHandler) HandleHome(c *gin.Context) {
 	did := c.GetString(middleware.ContextKeyDID)
 	sessionID := c.GetString(middleware.ContextKeySessionID)
@@ -506,27 +548,47 @@ func (h *UIHandler) HandleHome(c *gin.Context) {
 		return
 	}
 
-	// Build the chrome first: its single getPreferences call also yields the muted words
-	// the Following feed is then filtered with (no second getPreferences on this render).
-	data := h.buildLayoutBase(c, did, sessionID, user)
-
-	// Fetch first page of Following feed — non-fatal if unavailable.
-	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
-	if fetchedPage, err := h.feedClient.GetFollowingFeed(
-		c.Request.Context(), did, sessionID, "", uiFeedLimit, data.MutedWords,
-	); err != nil {
-		slog.Error("GetFollowingFeed in home handler", "did", did, "err", err)
-	} else {
-		feedPage = fetchedPage
-	}
-
-	data.FeedPage = feedPage
+	data := buildShellLayout(did, sessionID, user, h.secret)
 	data.FeedType = "following"
-	data.SentinelURL = followingSentinelURL(feedPage.NextCursor)
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplHome.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		slog.Error("render home template", "err", err)
+	}
+}
+
+// buildShellLayout builds the LayoutData for the instant home shell. It is a PURE
+// function of local inputs — it takes no feed client and performs no I/O — so it is
+// structurally impossible for it to make an upstream call. That is the enforcement
+// behind "GET / makes zero upstream calls": there is no client to reach the PDS with.
+// The tab bar and recent-tags rail are deferred to their own lazy partials via
+// LazyChrome; the unread badge starts at 0 and is filled by the client poll.
+func buildShellLayout(did, sessionID string, user db.User, secret []byte) LayoutData {
+	theme := user.Theme
+	if user.Plan == "free" && theme != "ocean" {
+		theme = "ocean"
+	}
+
+	handle := user.Handle.String
+	if !user.Handle.Valid || handle == "" {
+		handle = did
+	}
+
+	avatar := ""
+	if user.Avatar.Valid {
+		avatar = user.Avatar.String
+	}
+
+	return LayoutData{
+		User: PageUser{
+			DID:    did,
+			Handle: handle,
+			Plan:   user.Plan,
+			Avatar: avatar,
+		},
+		Theme:      theme,
+		CSRFToken:  auth.CSRFToken(sessionID, secret),
+		LazyChrome: true,
 	}
 }
 
@@ -538,12 +600,17 @@ func (h *UIHandler) HandleFollowingFeedPartial(c *gin.Context) {
 	sessionID := c.GetString(middleware.ContextKeySessionID)
 	cursor := c.Query("cursor")
 
-	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), uiFeedFetchTimeout)
+	defer cancel()
+
+	mutedWords := h.mutedWordsFor(ctx, did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
+	feedErr := false
 	if fetchedPage, err := h.feedClient.GetFollowingFeed(
-		c.Request.Context(), did, sessionID, cursor, uiFeedLimit, mutedWords,
+		ctx, did, sessionID, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
 		slog.Error("GetFollowingFeed (partial)", "did", did, "err", err)
+		feedErr = true
 	} else {
 		feedPage = fetchedPage
 	}
@@ -552,6 +619,12 @@ func (h *UIHandler) HandleFollowingFeedPartial(c *gin.Context) {
 		FeedPage:    feedPage,
 		FeedType:    "following",
 		SentinelURL: followingSentinelURL(feedPage.NextCursor),
+	}
+	// Only surface the failure notice on the full-feed load (no cursor). A pagination
+	// (feed-more) failure just stops the infinite scroll — no notice mid-list.
+	if feedErr && cursor == "" {
+		data.FeedError = true
+		data.RetryURL = c.Request.URL.RequestURI()
 	}
 
 	tmplName := "feed"
@@ -591,13 +664,18 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 		return
 	}
 
-	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), uiFeedFetchTimeout)
+	defer cancel()
+
+	mutedWords := h.mutedWordsFor(ctx, did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
+	feedErr := false
 	if len(tags) > 0 {
 		if fetchedPage, err := h.feedClient.GetHashtagFeed(
-			c.Request.Context(), did, sessionID, tags, author, cursor, uiFeedLimit, mutedWords,
+			ctx, did, sessionID, tags, author, cursor, uiFeedLimit, mutedWords,
 		); err != nil {
 			slog.Error("GetHashtagFeed (partial)", "did", did, "tags", tags, "author", author, "err", err)
+			feedErr = true
 		} else {
 			feedPage = fetchedPage
 		}
@@ -609,6 +687,10 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 		FeedTags:    tags,
 		FeedAuthor:  author,
 		SentinelURL: hashtagSentinelURL(tags, author, feedPage.NextCursor),
+	}
+	if feedErr && cursor == "" {
+		data.FeedError = true
+		data.RetryURL = c.Request.URL.RequestURI()
 	}
 
 	tmplName := "feed"
@@ -635,12 +717,17 @@ func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
 		return
 	}
 
-	mutedWords := h.mutedWordsFor(c.Request.Context(), did, sessionID)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), uiFeedFetchTimeout)
+	defer cancel()
+
+	mutedWords := h.mutedWordsFor(ctx, did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
+	feedErr := false
 	if fetchedPage, err := h.feedClient.GetCustomFeed(
-		c.Request.Context(), did, sessionID, feedURI, cursor, uiFeedLimit, mutedWords,
+		ctx, did, sessionID, feedURI, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
 		slog.Error("GetCustomFeed (partial)", "did", did, "uri", feedURI, "err", err)
+		feedErr = true
 	} else {
 		feedPage = fetchedPage
 	}
@@ -651,6 +738,10 @@ func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
 		FeedCustomURI: feedURI,
 		SentinelURL:   customFeedSentinelURL(feedURI, feedPage.NextCursor),
 	}
+	if feedErr && cursor == "" {
+		data.FeedError = true
+		data.RetryURL = c.Request.URL.RequestURI()
+	}
 
 	tmplName := "feed"
 	if cursor != "" {
@@ -660,6 +751,59 @@ func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmplHome.ExecuteTemplate(c.Writer, tmplName, data); err != nil {
 		slog.Error("render custom feed partial", "template", tmplName, "err", err)
+	}
+}
+
+// HandleFeedTabsPartial serves the saved-feeds tab bar as a lazy HTMX region for the
+// home shell (hx-get on load). It performs the one getPreferences call the shell
+// deferred. On failure (PDS degradation) it degrades to a Following-only tab bar with
+// a small note rather than an error — the same server-side fallback the synchronous
+// path had, now with a face. Rendered as "feed-tabs-inner" (the tab buttons), swapped
+// into the <nav class="feed-tabs"> the layout already emitted.
+func (h *UIHandler) HandleFeedTabsPartial(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+	sessionID := c.GetString(middleware.ContextKeySessionID)
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), uiFeedFetchTimeout)
+	defer cancel()
+
+	data := LayoutData{
+		// The shell always lands on Following, so mark that tab active by default.
+		FeedType: "following",
+	}
+	if prefs, err := h.feedClient.GetPreferences(ctx, did, sessionID); err != nil {
+		slog.Warn("GetPreferences (tabs partial) failed; degrading to Following-only", "did", did, "err", err)
+		data.SavedFeeds = []feed.SavedFeed{{DisplayName: "Following", IsTimeline: true}}
+		data.TabsDegraded = true
+	} else {
+		data.SavedFeeds = prefs.SavedFeeds
+	}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplHome.ExecuteTemplate(c.Writer, "feed-tabs-inner", data); err != nil {
+		slog.Error("render feed tabs partial", "err", err)
+	}
+}
+
+// HandleRecentTagsPartial serves the right-rail recent-tags list as a lazy HTMX region
+// for the home shell. The underlying query is Postgres-local and fast; it is deferred
+// only for pattern consistency with the other shell regions (one lazy-load story for
+// the whole page). Rendered as "recent-tags-inner", swapped into the rail container.
+func (h *UIHandler) HandleRecentTagsPartial(c *gin.Context) {
+	did := c.GetString(middleware.ContextKeyDID)
+
+	user, err := h.queries.GetUserByDID(c.Request.Context(), did)
+	if err != nil {
+		slog.Error("GetUserByDID (recent-tags partial)", "did", did, "err", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+
+	data := LayoutData{RecentTags: h.recentTagsFor(c.Request.Context(), user.ID)}
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmplHome.ExecuteTemplate(c.Writer, "recent-tags-inner", data); err != nil {
+		slog.Error("render recent tags partial", "err", err)
 	}
 }
 
@@ -682,17 +826,7 @@ func (h *UIHandler) resolveUserForTemplates(c *gin.Context, did string) (db.User
 // buildLayoutBase populates the common LayoutData fields for a given user,
 // including fetching saved feeds for the tab bar (non-fatal on failure).
 func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user db.User) LayoutData {
-	tagRows, err := h.queries.GetRecentTagsByUser(
-		c.Request.Context(),
-		pgtype.Int4{Int32: user.ID, Valid: true},
-	)
-	if err != nil {
-		slog.Error("GetRecentTagsByUser", "user_id", user.ID, "err", err)
-	}
-	recentTags := make([]string, 0, len(tagRows))
-	for _, row := range tagRows {
-		recentTags = append(recentTags, row.Tag)
-	}
+	recentTags := h.recentTagsFor(c.Request.Context(), user.ID)
 
 	theme := user.Theme
 	if user.Plan == "free" && theme != "ocean" {
@@ -762,6 +896,21 @@ func (h *UIHandler) buildLayoutBase(c *gin.Context, did, sessionID string, user 
 		MutedWords:  mutedWords,
 		UnreadCount: unreadCount,
 	}
+}
+
+// recentTagsFor returns the user's last unique hashtags (right-rail rota) from the
+// local post_history table, degrading to an empty slice on error. Shared by
+// buildLayoutBase (synchronous pages) and HandleRecentTagsPartial (home shell).
+func (h *UIHandler) recentTagsFor(ctx context.Context, userID int32) []string {
+	tagRows, err := h.queries.GetRecentTagsByUser(ctx, pgtype.Int4{Int32: userID, Valid: true})
+	if err != nil {
+		slog.Error("GetRecentTagsByUser", "user_id", userID, "err", err)
+	}
+	recentTags := make([]string, 0, len(tagRows))
+	for _, row := range tagRows {
+		recentTags = append(recentTags, row.Tag)
+	}
+	return recentTags
 }
 
 // fetchMutedWords fetches the user's muted words for feed content filtering, degrading to

@@ -51,21 +51,17 @@
     </aside>
 
     <!-- Centre -->
-    <main class="centre{{if .SavedFeeds}} has-feed-tabs{{end}}">
-        {{if .SavedFeeds}}
+    <main class="centre{{if or .LazyChrome .SavedFeeds}} has-feed-tabs{{end}}">
+        {{if .LazyChrome}}
+        <!-- Shell: the tab bar lazy-loads its saved feeds on load, so GET / makes no
+             upstream call. The skeleton flips to the real tabs (or a degraded
+             Following-only bar) when /feed/tabs responds. -->
+        <nav class="feed-tabs" hx-get="/feed/tabs" hx-trigger="load" hx-swap="innerHTML">
+            {{template "feed-tabs-skeleton" .}}
+        </nav>
+        {{else if .SavedFeeds}}
         <nav class="feed-tabs">
-            {{$feedType := .FeedType}}
-            {{$customURI := .FeedCustomURI}}
-            {{range .SavedFeeds}}
-            {{if .IsTimeline}}
-            <button class="feed-tab{{if eq $feedType "following"}} active{{end}}"
-                    data-timeline
-                    onclick="switchFeedTab(this, '/feed/following')">{{.DisplayName}}</button>
-            {{else}}
-            <button class="feed-tab{{if and (eq $feedType "custom") (eq .URI $customURI)}} active{{end}}"
-                    onclick="switchFeedTab(this, '/feed/custom?uri={{urlquote .URI}}')">{{.DisplayName}}</button>
-            {{end}}
-            {{end}}
+            {{template "feed-tabs-inner" .}}
         </nav>
         {{end}}
         {{template "content" .}}
@@ -74,14 +70,12 @@
     <!-- Right Rail -->
     <aside class="right-rail">
         <h2 class="rail-heading">Recent Tags</h2>
-        {{if .RecentTags}}
-        <ul class="recent-tags">
-            {{range .RecentTags}}
-            <li><button type="button" class="tag-link" onclick="switchToHashtagFeed(['{{.}}'])">#{{.}}</button></li>
-            {{end}}
-        </ul>
+        {{if .LazyChrome}}
+        <div class="recent-tags-region" hx-get="/feed/recent-tags" hx-trigger="load" hx-swap="innerHTML">
+            {{template "recent-tags-skeleton" .}}
+        </div>
         {{else}}
-        <p class="muted-text">No recent tags yet.</p>
+        {{template "recent-tags-inner" .}}
         {{end}}
     </aside>
 

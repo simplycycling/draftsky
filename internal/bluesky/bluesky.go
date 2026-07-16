@@ -2,6 +2,7 @@ package bluesky
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -13,10 +14,64 @@ import (
 
 	comatproto "github.com/bluesky-social/indigo/api/atproto"
 	appbsky "github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/atproto/atclient"
 	"github.com/bluesky-social/indigo/atproto/auth/oauth"
 	"github.com/bluesky-social/indigo/atproto/syntax"
 	lexutil "github.com/bluesky-social/indigo/lex/util"
 )
+
+// postAttemptTimeout bounds a single createRecord attempt. A post is worth waiting
+// for (unlike a page-blocking feed fetch, which fails fast at ~6s), so this budget
+// is generous — and each of the two attempts gets its own full budget.
+const postAttemptTimeout = 10 * time.Second
+
+// postRetryDelay is the pause before the single createRecord retry. During the
+// 2026-07-15 PDS degradation, intermittent successes in the logs showed that a
+// single retry converts a real transient failure into a completed post often enough
+// to be worth the wait.
+var postRetryDelay = 2 * time.Second
+
+// isRetriablePostError decides whether a failed createRecord may be retried. A 4xx is
+// a rejected record (bad request, auth, conflict): retrying would fail identically or,
+// worse, DOUBLE-POST if the first attempt actually landed on the server before the
+// response was lost. So 4xx is never retried. Everything else — connection refused,
+// TLS/handshake timeout, context deadline, EOF, 5xx — is a transient server/network
+// failure and is retried once. atclient surfaces HTTP failures as *atclient.APIError
+// with the status code; a non-APIError means the request never got an HTTP response
+// (pure network/timeout) and is therefore transient.
+func isRetriablePostError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *atclient.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode < 400 || apiErr.StatusCode >= 500
+	}
+	return true
+}
+
+// createWithRetry runs create once and, if it fails with a transient error
+// (isRetriablePostError), waits delay and runs it exactly once more. A 4xx failure
+// returns immediately with no retry. The context is honoured during the delay so a
+// cancelled request does not sit waiting. create is expected to apply its own
+// per-attempt timeout (postAttemptTimeout) so each attempt gets a full budget.
+func createWithRetry(
+	ctx context.Context,
+	delay time.Duration,
+	create func(context.Context) (*comatproto.RepoCreateRecord_Output, error),
+) (*comatproto.RepoCreateRecord_Output, error) {
+	out, err := create(ctx)
+	if err == nil || !isRetriablePostError(err) {
+		return out, err
+	}
+	slog.WarnContext(ctx, "createRecord failed with a transient error; retrying once", "err", err)
+	select {
+	case <-time.After(delay):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return create(ctx)
+}
 
 // IsRateLimitError returns true if err is an HTTP 429 response from the Bluesky PDS.
 // Indigo surfaces upstream HTTP errors with the status code in the message.
@@ -169,10 +224,17 @@ func (p *Poster) Post(ctx context.Context, didStr, sessionID, text, suffix strin
 		post.Embed = embed
 	}
 
-	out, err := comatproto.RepoCreateRecord(ctx, apiClient, &comatproto.RepoCreateRecord_Input{
+	input := &comatproto.RepoCreateRecord_Input{
 		Collection: "app.bsky.feed.post",
 		Repo:       didStr,
 		Record:     &lexutil.LexiconTypeDecoder{Val: post},
+	}
+	// Each attempt gets its own postAttemptTimeout budget; a single transient-failure
+	// retry runs after postRetryDelay (see createWithRetry). A 4xx is never retried.
+	out, err := createWithRetry(ctx, postRetryDelay, func(cctx context.Context) (*comatproto.RepoCreateRecord_Output, error) {
+		attemptCtx, cancel := context.WithTimeout(cctx, postAttemptTimeout)
+		defer cancel()
+		return comatproto.RepoCreateRecord(attemptCtx, apiClient, input)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create record: %w", err)

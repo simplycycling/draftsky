@@ -208,6 +208,8 @@ func main() {
 	web.GET("", uiH.HandleHome)
 	web.GET("/thread", uiH.HandleThreadPage)
 	web.GET("/notifications", uiH.HandleNotificationsPage)
+	web.GET("/feed/tabs", uiH.HandleFeedTabsPartial)
+	web.GET("/feed/recent-tags", uiH.HandleRecentTagsPartial)
 	web.GET("/feed/following", uiH.HandleFollowingFeedPartial)
 	web.GET("/feed/hashtags", uiH.HandleHashtagFeedPartial)
 	web.GET("/feed/custom", uiH.HandleCustomFeedPartial)

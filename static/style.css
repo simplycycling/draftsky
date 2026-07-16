@@ -2329,3 +2329,116 @@ button {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* =========================================================
+   Loading skeletons + upstream-failure notices
+   The home shell paints instantly and each region (tab bar,
+   centre feed, recent-tags rail) shows a skeleton until its
+   lazy partial loads — then the content, or a "Bluesky isn't
+   responding" notice. Pure CSS; animation respects
+   prefers-reduced-motion.
+   ========================================================= */
+.skeleton {
+    display: block;
+    background: linear-gradient(
+        90deg,
+        var(--color-card) 25%,
+        var(--color-surface) 37%,
+        var(--color-card) 63%
+    );
+    background-size: 400% 100%;
+    border-radius: var(--radius);
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+/* Feed skeleton — placeholder cards in the post-card shape. */
+.feed-skeleton .skeleton-card {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--color-surface);
+}
+.skeleton-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-full);
+    flex: 0 0 auto;
+}
+.skeleton-card-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding-top: 0.2rem;
+}
+.skeleton-line {
+    height: 0.7rem;
+}
+.skeleton-line-head { width: 40%; }
+.skeleton-line-short { width: 65%; }
+.skeleton-label { width: 90px; height: 0.9rem; }
+
+/* Tab-bar skeleton — pill-shaped placeholders sized like tabs. */
+.skeleton-tab {
+    display: inline-block;
+    width: 76px;
+    height: 1.5rem;
+    border-radius: var(--radius-full);
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+/* Recent-tags skeleton — short bars in the tag-link rota. */
+.skeleton-tag {
+    width: 100%;
+    height: 1.1rem;
+}
+.skeleton-tag-sm { width: 70%; }
+
+/* A free-user's tab bar that could not load its saved feeds degrades to
+   Following-only plus this quiet note. */
+.feed-tabs-note {
+    align-self: center;
+    margin-left: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--color-muted);
+    white-space: nowrap;
+}
+
+/* Upstream-failure notice inside the feed column. */
+.feed-notice {
+    margin: 1.5rem 1rem;
+    padding: 1.25rem;
+    border: 1px solid var(--color-surface);
+    border-radius: var(--radius);
+    background: var(--color-card);
+    text-align: center;
+}
+.feed-notice-title {
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 0.35rem;
+}
+.feed-notice-body {
+    color: var(--color-muted);
+    margin-bottom: 1rem;
+}
+.btn-retry {
+    padding: 0.5rem 1.25rem;
+    border: none;
+    border-radius: var(--radius-full);
+    background: var(--color-accent);
+    color: var(--color-bg);
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn-retry:hover { opacity: 0.9; }
+
+@media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+}

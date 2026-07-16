@@ -1,0 +1,52 @@
+{{/*
+  Shared page-chrome partials: the saved-feeds tab bar and the recent-tags rail, each
+  as an "inner" partial plus a loading skeleton. The home shell (LazyChrome) renders
+  the skeletons and lazy-loads the inners via /feed/tabs and /feed/recent-tags on load,
+  so GET / makes no upstream calls. Every other page renders the inners synchronously
+  from server data. All layout-using template sets parse this file so the definitions
+  always resolve regardless of which branch layout.html takes.
+*/}}
+
+{{define "feed-tabs-inner"}}
+{{$feedType := .FeedType}}
+{{$customURI := .FeedCustomURI}}
+{{range .SavedFeeds}}
+{{if .IsTimeline}}
+<button class="feed-tab{{if eq $feedType "following"}} active{{end}}"
+        data-timeline
+        onclick="switchFeedTab(this, '/feed/following')">{{.DisplayName}}</button>
+{{else}}
+<button class="feed-tab{{if and (eq $feedType "custom") (eq .URI $customURI)}} active{{end}}"
+        onclick="switchFeedTab(this, '/feed/custom?uri={{urlquote .URI}}')">{{.DisplayName}}</button>
+{{end}}
+{{end}}
+{{if .TabsDegraded}}<span class="feed-tabs-note" title="DraftSky is fine — Bluesky is slow to respond right now.">feeds unavailable</span>{{end}}
+{{end}}
+
+{{define "feed-tabs-skeleton"}}
+<span class="skeleton skeleton-tab" aria-hidden="true"></span>
+<span class="skeleton skeleton-tab" aria-hidden="true"></span>
+<span class="skeleton skeleton-tab" aria-hidden="true"></span>
+{{end}}
+
+{{define "recent-tags-inner"}}
+{{if .RecentTags}}
+<ul class="recent-tags">
+    {{range .RecentTags}}
+    <li><button type="button" class="tag-link" onclick="switchToHashtagFeed(['{{.}}'])">#{{.}}</button></li>
+    {{end}}
+</ul>
+{{else}}
+<p class="muted-text">No recent tags yet.</p>
+{{end}}
+{{end}}
+
+{{define "recent-tags-skeleton"}}
+<ul class="recent-tags" aria-hidden="true">
+    <li><span class="skeleton skeleton-tag"></span></li>
+    <li><span class="skeleton skeleton-tag skeleton-tag-sm"></span></li>
+    <li><span class="skeleton skeleton-tag"></span></li>
+    <li><span class="skeleton skeleton-tag skeleton-tag-sm"></span></li>
+    <li><span class="skeleton skeleton-tag"></span></li>
+</ul>
+{{end}}

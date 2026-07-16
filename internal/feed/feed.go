@@ -102,6 +102,14 @@ type FeedPage struct {
 // Client wraps the OAuth ClientApp for feed fetching.
 type Client struct {
 	app *oauth.ClientApp
+	// sessionMu serialises ResumeSession per session so concurrent resumers don't race
+	// to refresh an expired access token. OAuth refresh tokens are single-use (rotated
+	// on refresh): if N goroutines each hit ResumeSession with an expired token at once,
+	// the first rotates the token and the rest fail with invalid_grant ("refresh token
+	// rotated concurrently"). The home shell makes this acute — three regions
+	// (/feed/tabs, /feed/following, the unread poll) fire concurrently on cold load, so
+	// a just-expired token would spuriously degrade one of them. Keyed by sessionID.
+	sessionMu sync.Map // sessionID → *sync.Mutex
 }
 
 // New returns a Client backed by the given ClientApp.
@@ -109,14 +117,27 @@ func New(app *oauth.ClientApp) *Client {
 	return &Client{app: app}
 }
 
+// lockForSession returns the per-session mutex, creating it on first use.
+func (c *Client) lockForSession(sessionID string) *sync.Mutex {
+	mu, _ := c.sessionMu.LoadOrStore(sessionID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
 // resumeAPIClient resolves the OAuth session for did/sessionID and returns an
-// authenticated API client ready to call Bluesky XRPC endpoints.
+// authenticated API client ready to call Bluesky XRPC endpoints. The refresh is
+// serialised per session (see sessionMu): the lock is held only across ResumeSession
+// — the point where a token refresh may rotate the refresh token — and released before
+// the caller's XRPC call, so feed fetches still run concurrently. The first resumer of
+// an expired session refreshes; the rest then see a valid token and skip the refresh.
 func (c *Client) resumeAPIClient(ctx context.Context, did, sessionID string) (*atclient.APIClient, error) {
 	d, err := syntax.ParseDID(did)
 	if err != nil {
 		return nil, fmt.Errorf("invalid DID %q: %w", did, err)
 	}
+	mu := c.lockForSession(sessionID)
+	mu.Lock()
 	sess, err := c.app.ResumeSession(ctx, d, sessionID)
+	mu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("resume session: %w", err)
 	}

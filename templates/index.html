@@ -1,5 +1,40 @@
 {{define "content"}}
-<div id="feed-root">
-    {{template "feed" .}}
+<!-- Shell: the centre feed lazy-loads on load so GET / paints instantly with no
+     upstream call. The skeleton flips to the Following feed (or a "Bluesky isn't
+     responding" notice) when /feed/following responds. #feed-root stays the target
+     for later feed-tab switches (switchFeedTab / switchToHashtagFeed). -->
+<div id="feed-root" hx-get="/feed/following" hx-trigger="load" hx-swap="innerHTML">
+    {{template "feed-skeleton" .}}
+</div>
+{{end}}
+
+{{define "feed-skeleton"}}
+<div class="feed-skeleton" aria-hidden="true">
+    <div class="feed-controls"><div class="feed-controls-inner"><span class="skeleton skeleton-label"></span></div></div>
+    {{/* three placeholder cards in the post-card shape */}}
+    <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton-card-body">
+            <div class="skeleton skeleton-line skeleton-line-head"></div>
+            <div class="skeleton skeleton-line"></div>
+            <div class="skeleton skeleton-line skeleton-line-short"></div>
+        </div>
+    </div>
+    <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton-card-body">
+            <div class="skeleton skeleton-line skeleton-line-head"></div>
+            <div class="skeleton skeleton-line"></div>
+            <div class="skeleton skeleton-line skeleton-line-short"></div>
+        </div>
+    </div>
+    <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton-card-body">
+            <div class="skeleton skeleton-line skeleton-line-head"></div>
+            <div class="skeleton skeleton-line"></div>
+            <div class="skeleton skeleton-line skeleton-line-short"></div>
+        </div>
+    </div>
 </div>
 {{end}}
