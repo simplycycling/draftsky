@@ -20,6 +20,18 @@ communities, professional topics, project promotion).
 
 ---
 
+## Session protocol
+
+Standard opening for every working session:
+
+- Read CLAUDE.md thoroughly — including the Gotchas and the Definition of Done.
+- Read DECISIONS.md — why things are the way they are, and what was rejected.
+- One concern per session; don't widen scope mid-session.
+- Respect scope fences — additive edits over rewrites, and confirm before reversing a
+  documented decision.
+
+---
+
 ## Tech Stack
 
 | Layer        | Technology                                      |
@@ -286,48 +298,84 @@ draftsky/
 
 ### General
 - Go version: 1.22+ (use standard library routing enhancements where appropriate)
-- All errors must be handled explicitly — no blank `_` error discards in production paths
-- Use structured logging (log/slog, standard library) — no fmt.Println in handlers
-- Environment variables for all config (DSN, session secret, OAuth client ID, etc.)
-- Never hardcode credentials or secrets
+- All errors must be handled explicitly — no blank `_` error discards in production paths,
+  because a swallowed error resurfaces later as corrupt state or a silent failure
+- Use structured logging (log/slog, standard library) — no fmt.Println in handlers, because
+  structured fields are filterable in production logs while bare prints bypass levels entirely
+- Environment variables for all config (DSN, session secret, OAuth client ID, etc.) — config
+  differs per environment and must never be baked into the binary or committed
+- Never hardcode credentials or secrets — a hardcoded secret leaks via the repo/image and
+  cannot be rotated without a rebuild
 - Non-critical writes after a successful external action (e.g. post_history insert
   after a Bluesky post) run in a detached goroutine — never fail the user action
 
 ### Naming
 - Handlers: `HandleGetTemplates`, `HandleCreateTemplate` etc. (Handle + HTTP verb + resource)
-- sqlc query files: one file per domain (`users.sql`, `templates.sql`)
-- Migration files: `000001_create_users.up.sql` / `000001_create_users.down.sql`
+  — a predictable scheme makes a handler's route and method obvious from its name, and greppable
+- sqlc query files: one file per domain (`users.sql`, `templates.sql`) — keeps each domain's
+  queries and their regenerated code together, so diffs and lookups stay local
+- Migration files: `000001_create_users.up.sql` / `000001_create_users.down.sql` — golang-migrate
+  discovers and orders migrations by exactly this sequential up/down naming
 
 ### Database
-- Always use parameterised queries (sqlc enforces this)
-- Migrations are sequential and never edited after creation — add a new migration to fix mistakes
-- The `did` column is the user identifier in all foreign key relationships, not `handle`
+- Always use parameterised queries (sqlc enforces this) — prevents SQL injection
+- Migrations are sequential and never edited after creation — add a new migration to fix mistakes,
+  because an already-applied migration never re-runs, so editing it desyncs migrated environments
+- The `did` column is the user identifier in all foreign key relationships, not `handle` —
+  handles can change, DIDs cannot (see the OAuth decision above)
 
 ### AT Protocol / Bluesky
 - Always use the indigo library for post construction — never build `app.bsky.feed.post`
-  records manually
-- Token refresh is transparent via `ResumeSession` (handles DPoP + refresh automatically)
+  records manually, because posts carry byte-offset facets that hand-built records corrupt (Gotcha 6)
+- Token refresh is reactive — it happens inside `DoWithAuth` during XRPC calls, NOT in
+  `ResumeSession`; all callers for a session must share one `ClientSession` instance (see Gotcha 25)
 - Detect upstream Bluesky 429s (`bluesky.IsRateLimitError`) and surface a readable 429
   to the client; never a generic 500
 - Respect Bluesky rate limits; surface errors clearly rather than silently failing
 
 ### HTMX
-- Partial templates live in `/templates/partials/`
-- HTMX responses return only the relevant partial, not a full page
-- Keep `hx-` attributes in the HTML; do not drive HTMX behaviour from JavaScript
+- Partial templates live in `/templates/partials/` — keeps HTMX fragments separate from
+  full-page templates so each is easy to find and reuse
+- HTMX responses return only the relevant partial, not a full page — HTMX swaps the response
+  into a target node, so a full page would nest document structure inside it
+- Keep `hx-` attributes in the HTML — behaviour stays declarative and inspectable in the
+  markup; do not drive HTMX behaviour from JavaScript
   (exception: `htmx.ajax()` for programmatic feed swaps in app.js)
 - JSON API handlers and HTMX handlers stay separate — never make a JSON endpoint
-  return HTML or vice versa
+  return HTML or vice versa, because the JSON API is the iOS contract and must stay HTML-free
 
 ### Security
 - Session cookies: HMAC-SHA256 signed, HttpOnly, Secure in production, SameSite=Lax,
-  constant-time comparison (`hmac.Equal`)
+  constant-time comparison (`hmac.Equal`) — the signature prevents forgery, HttpOnly blocks
+  JS theft, SameSite mitigates CSRF, and constant-time compare avoids signature timing leaks
 - Security headers middleware on all routes (nosniff, frame deny, referrer policy, CSP
-  with 'unsafe-inline' — TODO: migrate to nonces)
+  with 'unsafe-inline' — TODO: migrate to nonces) — defence-in-depth against MIME-sniffing,
+  clickjacking, and referrer leakage
 - Rate limits: 10/min per DID on posting; 60/min per DID on likes + template CRUD;
-  429 + Retry-After on breach
+  429 + Retry-After on breach — limits are judgment values: tight enough to stop a runaway
+  client from damaging DraftSky's standing with Bluesky, loose enough that a human never hits them
 - Server-side validation is the enforcement; JS counters are UX only
-- Ownership verification on every template mutation (user_id in the query)
+- Ownership verification on every template mutation (user_id in the query) — stops one user
+  reading or mutating another user's templates (IDOR)
+
+---
+
+## Definition of Done
+
+A change is DONE only when all of these hold:
+
+- **Wired end-to-end** — handler + query (sqlc regenerated) + template + route all exist;
+  `go build ./...`, `go vet ./...`, and the full test suite pass.
+- **Pure logic has table tests** — anything expressible as a pure function is tested
+  (precedent: `composerState`, `validatePostRefs`, `mapFeedViewPosts`).
+- **Executed once against the running artifact** — server rebuilt, browser hard-refreshed,
+  and the CHANGED BEHAVIOUR actually driven. Code-walks pass while browsers fail; status-code
+  curls verify handlers, not DOM (Gotchas 10, 16). Not optional.
+- **Test data cleaned by captured id** — never by a name/handle or other human-meaningful
+  field (Gotcha 19).
+- **Docs updated** — CLAUDE.md if a lesson was learned (new Gotcha); DECISIONS.md appended
+  if a significant choice was made.
+- **Not committed** — Roger commits. Do not `git commit` or `git push`.
 
 ---
 
@@ -632,12 +680,16 @@ in Docker (`docker start draftsky-dev-db`).
 - Three-column responsive layout, Deep Ocean theme (+3 paid themes defined in CSS)
 - Security headers, robots.txt, favicon, tiered rate limiting
 - Railway deployment, custom domain, bare-domain 301 redirect
+- Free tier enforcement — server-side 5-template cap on POST /api/templates (free plan; 403
+  with an upgrade message at the cap; documented count-then-insert race, worst case one bonus
+  template — see DECISIONS.md), `RequirePaidPlan` middleware for future paid-only endpoints,
+  and trusted-proxy scoping (RFC1918 + CGNAT)
 
 ### Current priority order (pre-GA ladder — GA after item 9)
-1. **Free tier enforcement** — 5-template limit on POST /api/templates (server-side,
-   403/409 with a clear message when a free user has 5), `RequirePaidPlan` middleware
-   for future paid-only endpoints; scope trusted proxies to Railway's CIDR (replace
-   the 0.0.0.0/0 placeholder)
+1. **Free tier enforcement** — ✅ **DONE** (see Shipped). Server-side 5-template cap on POST
+   /api/templates (403 with a clear message at the cap; documented count-then-insert race,
+   worst case one bonus template), `RequirePaidPlan` middleware for future paid-only endpoints,
+   and trusted-proxy scoping. Only the conditional CIDR tighten remains (see Technical debt).
 2. **Quote posts** — the repost button becomes a small Repost/Quote menu; Quote opens
    the composer in quote mode (like reply mode, carrying `{uri, cid}`), which attaches
    an `app.bsky.embed.record` to the post record. Templates work in quotes. Quote mode
@@ -763,7 +815,7 @@ After item 9: **GA**.
 ### Technical debt
 - CSP uses 'unsafe-inline' — migrate to nonces
 - Rate limiter sync.Map grows unbounded — needs cleanup or Redis at scale
-- Trusted proxies at 0.0.0.0/0 pending Railway CIDR scoping
+- Trusted proxies: RFC1918+CGNAT scoping shipped; tighten to Railway's specific CIDR only if Railway ever documents one.
 
 ---
 
@@ -851,10 +903,10 @@ DraftSky uses a freemium model on web and an ad-supported + one-time purchase mo
 - Free tier: up to 5 templates, Following feed, posting, replies, Ocean theme only
 - Paid tier: unlimited templates, all themes, tabbed hashtag feed (future), hashtag
   performance analytics (future — the paid flagship; see roadmap)
-- Enforced via the `plan` column (enforcement pending — priority item 5)
+- Enforced via the `plan` column (free-tier 5-template cap shipped — see Shipped)
 
 **iOS (future):**
-- Ads by default (AdMob or equivalent); non-consumable IAP via StoreKit 2 removes them
+- IAP-only leaning; ads under doubt (ATT prompt, SDK weight, review complexity) - final call at iOS build time, see DECISIONS.md.
 - Purchase tied to the user's DID, not the device — buying on iOS sets `plan = 'paid'`
   server-side, upgrading web too
 - **Server-side Apple receipt verification is mandatory** — never trust the client
