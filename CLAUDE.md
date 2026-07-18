@@ -485,6 +485,42 @@ Append-only list — check the current highest number before adding.
     concurrently. Only surfaces against a live PDS with an expired token (Gotcha 16
     class); the mutex map grows unbounded like the rate limiter (same tech-debt bucket).
     The `bluesky.Poster` resume path is not yet serialised (posting isn't self-concurrent).
+    **CORRECTION (see Gotcha 25):** this fix did NOT work — `ResumeSession` is not "the
+    refresh point" (it performs no refresh), so the mutex never covered the rotation and
+    the burn kept happening. Superseded by the ClientSession cache in Gotcha 25.
+25. **The real fix for the refresh-token burn: cache the `ClientSession`, don't just lock
+    `ResumeSession`.** The 2026-07-17 token-burn incident (a user's refresh token died with
+    `invalid_grant`; every feed region then showed the "Bluesky isn't responding" network
+    notice — a lie, since only re-login could recover it) exposed that Gotcha 24's mutex was
+    load-bearing on a false premise. Tracing the vendored indigo (`atproto/auth/oauth`):
+    (a) `ClientApp.ResumeSession` does **no** token refresh — it loads session data from the
+    store and builds a *fresh* `ClientSession` each call. (b) The refresh is **reactive**,
+    happening inside `ClientSession.DoWithAuth` on a 401 *during the XRPC call* — which runs
+    OUTSIDE `resumeAPIClient`'s mutex. indigo does not persist access-token expiry
+    (`session.go` TODO), so proactive refresh-under-lock is impossible. (c) The `use_dpop_nonce`
+    dance on the token endpoint is already handled correctly by indigo's `postToAuthServer`
+    (`for range 2` loop captures the `DPoP-Nonce` header and retries) — a nonce renegotiation
+    does NOT burn the token (the server rejects the 400 *before* consuming the grant), so the
+    nonce retry was never the bug. The bug is `session.go`'s own warning: *"concurrent calls to
+    distinct ClientSession instances for the same session could result in clobbered session
+    data."* Building a fresh instance per call meant the async shell's ~3 concurrent regions
+    each refreshed the same stale refresh token R0 → first wins (R0→R1), losers send the
+    consumed R0 → `invalid_grant` → burned session. PDS degradation widens the window (slow
+    requests keep all three holding R0). **Fix:** `feed.Client` caches ONE `*oauth.ClientSession`
+    per sessionID (`sync.Map` + `sync.Once`); a single instance is concurrency-safe and
+    serialises its own refresh via its internal `sess.lk`, so the rotated token is never sent
+    twice (a redundant second refresh may happen but rotates a *valid* token — no burn). The two
+    fixes reinforce: eliminating the self-inflicted burn means a surviving `invalid_grant` now
+    genuinely signals a dead session, so `auth.IsDeadSession` (string-matches `invalid_grant` /
+    `oauth session not found`; indigo exports no typed error — atclient returns the DoWithAuth
+    error verbatim, so the string survives) can safely drive re-login UX and `InvalidateSession`
+    (evict cache + delete the session row) without risking logging out a hiccuped user. The
+    session cookie outlives the OAuth tokens (independent lifetimes), so `RequireSession`/
+    `RequireAuth` — which only validate the cookie — pass for a dead session; the deadness only
+    surfaces at the feed-fetch layer, which is where it's now classified. The `bluesky.Poster`
+    path still builds its own ClientSession (unchanged — posting isn't self-concurrent, but a
+    concurrent post + feed refresh could still theoretically race; same tech-debt bucket).
+    Live-verified 2026-07-18 by corrupting the stored refresh token (Gotcha 16 class).
 
 ---
 
@@ -509,6 +545,24 @@ in Docker (`docker start draftsky-dev-db`).
 ## Status & Roadmap
 
 ### Shipped (live at www.draftsky.social, private beta)
+- Dead-session honesty + refresh-token burn fix — from the 2026-07-17 incident. TWO parts.
+  (1) Root cause: Gotcha 24's mutex never covered the token refresh (refresh is reactive in
+  indigo's `DoWithAuth`, not in `ResumeSession`), so concurrent home-shell regions each
+  refreshed the same single-use refresh token and burned the session with `invalid_grant`.
+  Real fix: `feed.Client` now caches ONE `*oauth.ClientSession` per sessionID (`sync.Map` +
+  `sync.Once`) — a single instance is concurrency-safe and serialises its own refresh, so the
+  rotated token is never re-sent. indigo already handles the `use_dpop_nonce` token-endpoint
+  retry, so no client nonce-retry was needed. (2) When a session IS genuinely dead,
+  `auth.IsDeadSession` (classifies `invalid_grant`/`oauth session not found` as dead vs
+  timeout/5xx as transient) drives honest UX instead of the "Bluesky isn't responding" lie:
+  the lazy feed region shows a distinct "Your session has expired — sign in again" notice
+  linking to `/login` (the login page's handle-entry form — NOT `/auth/login`, which needs a
+  `?handle=` param and 400s bare; caught live); JSON API endpoints return 401
+  `{code:"session_expired"}` (the
+  notification poll already stops on 401); synchronous full pages (`/thread`, `/notifications`,
+  `/profile`) redirect to `/login`; and `InvalidateSession` evicts the cached session + deletes
+  the dead OAuth row (only on definitive `invalid_grant`, never on a transient hiccup). See
+  Gotchas 24 (corrected), 25. Live-verified 2026-07-18 (corrupted stored refresh token).
 - Async home shell (PDS-degradation resilience) — `GET /` renders INSTANTLY with zero
   upstream calls: `HandleHome` uses a pure `buildShellLayout` (no feed client, so
   zero-upstream is structural, not runtime), and the tab bar, centre feed, and

@@ -175,6 +175,61 @@ func TestFeedNoticeRenders(t *testing.T) {
 	}
 }
 
+// TestSessionExpiredNoticeRenders verifies that a feed whose upstream fetch failed because
+// the OAuth session is DEAD renders the distinct "session has expired" notice with a link to
+// /auth/login — NOT the transient network notice (no Retry button, since retrying can never
+// recover a dead session) and NOT the empty state. SessionExpired must win over FeedError.
+func TestSessionExpiredNoticeRenders(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(repoRootFromTest(t)); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	h, err := NewUIHandler(nil, []byte("test-secret"), nil)
+	if err != nil {
+		t.Fatalf("NewUIHandler: %v", err)
+	}
+
+	data := LayoutData{
+		FeedType:       "following",
+		FeedPage:       &feed.FeedPage{Posts: []feed.PostView{}},
+		SessionExpired: true,
+		// FeedError also set to prove SessionExpired takes precedence in the template.
+		FeedError: true,
+		RetryURL:  "/feed/following",
+	}
+
+	var buf strings.Builder
+	if err := h.tmplHome.ExecuteTemplate(&buf, "feed", data); err != nil {
+		t.Fatalf("execute feed: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"session has expired", // the distinct title
+		`href="/login"`,       // the sign-in link (the login PAGE, not /auth/login which needs ?handle)
+		"Sign in again",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("session-expired render missing %q", want)
+		}
+	}
+	// It must be the session notice, not the transient network notice or empty state.
+	for _, unwanted := range []string{
+		"responding",     // the network-notice title
+		`hx-get=`,        // no Retry button (dead session can't be retried)
+		"No posts yet",
+	} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("session-expired render must not contain %q (that is the transient/empty path)", unwanted)
+		}
+	}
+}
+
 // TestFeedTabsDegradedRenders verifies the /feed/tabs degraded fallback: when
 // getPreferences fails the tab bar shows a Following-only bar plus a quiet note,
 // instead of an error or a blank bar.

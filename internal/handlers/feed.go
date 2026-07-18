@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/rsherman/draftsky/internal/auth"
 	"github.com/rsherman/draftsky/internal/feed"
 	"github.com/rsherman/draftsky/internal/middleware"
 )
@@ -25,6 +26,31 @@ type FeedHandler struct {
 // NewFeedHandler constructs a FeedHandler.
 func NewFeedHandler(client *feed.Client) *FeedHandler {
 	return &FeedHandler{client: client}
+}
+
+// respondDeadSessionJSON handles a dead OAuth session (invalid_grant on refresh) for JSON
+// API endpoints: it invalidates the session's cached + stored state and writes a 401
+// carrying a machine-readable "session_expired" code, so clients (the iOS app, and the web
+// notification poll, which already stops polling on any 401) prompt a fresh login instead
+// of retrying forever. Returns true when it handled err; callers fall through to their own
+// transient-error response (typically 502) when it returns false. Shared by every JSON
+// feed/profile handler so the dead-session contract is identical across the API surface.
+func respondDeadSessionJSON(c *gin.Context, client *feed.Client, did, sessionID string, err error) bool {
+	if !auth.IsDeadSession(err) {
+		return false
+	}
+	slog.Warn("dead OAuth session on JSON API; invalidating", "did", did, "err", err)
+	client.InvalidateSession(did, sessionID)
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"error": "Your session has expired — please sign in again.",
+		"code":  "session_expired",
+	})
+	return true
+}
+
+// deadSessionJSON is the FeedHandler convenience wrapper over respondDeadSessionJSON.
+func (h *FeedHandler) deadSessionJSON(c *gin.Context, did, sessionID string, err error) bool {
+	return respondDeadSessionJSON(c, h.client, did, sessionID, err)
 }
 
 // parseLimit reads the "limit" query parameter, applying the default and
@@ -58,6 +84,9 @@ func (h *FeedHandler) HandleGetFollowingFeed(c *gin.Context) {
 	mutedWords := fetchMutedWords(c.Request.Context(), h.client, did, sessionID)
 	page, err := h.client.GetFollowingFeed(c.Request.Context(), did, sessionID, cursor, limit, mutedWords)
 	if err != nil {
+		if h.deadSessionJSON(c, did, sessionID, err) {
+			return
+		}
 		slog.Error("GetFollowingFeed failed", "did", did, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch following feed"})
 		return
@@ -111,6 +140,9 @@ func (h *FeedHandler) HandleGetHashtagFeed(c *gin.Context) {
 	mutedWords := fetchMutedWords(c.Request.Context(), h.client, did, sessionID)
 	page, err := h.client.GetHashtagFeed(c.Request.Context(), did, sessionID, tags, author, cursor, limit, mutedWords)
 	if err != nil {
+		if h.deadSessionJSON(c, did, sessionID, err) {
+			return
+		}
 		slog.Error("GetHashtagFeed failed", "did", did, "tags", tags, "author", author, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch hashtag feed"})
 		return
@@ -134,6 +166,9 @@ func (h *FeedHandler) HandleGetNotifications(c *gin.Context) {
 
 	page, err := h.client.GetNotifications(c.Request.Context(), did, sessionID, cursor, limit)
 	if err != nil {
+		if h.deadSessionJSON(c, did, sessionID, err) {
+			return
+		}
 		slog.Error("GetNotifications failed", "did", did, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch notifications"})
 		return
@@ -149,6 +184,9 @@ func (h *FeedHandler) HandleGetUnreadCount(c *gin.Context) {
 
 	count, err := h.client.GetUnreadCount(c.Request.Context(), did, sessionID)
 	if err != nil {
+		if h.deadSessionJSON(c, did, sessionID, err) {
+			return
+		}
 		slog.Error("GetUnreadCount failed", "did", did, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch unread count"})
 		return

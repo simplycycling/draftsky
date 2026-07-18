@@ -79,6 +79,12 @@ func (h *UIHandler) HandleProfilePage(c *gin.Context) {
 
 	profile, err := h.feedClient.GetProfile(c.Request.Context(), did, sessionID, actor)
 	if err != nil {
+		// Distinguish a dead session (send to login) from a genuinely unresolvable actor
+		// (404) — a dead session would otherwise masquerade as "profile not found".
+		if h.sessionDead(did, sessionID, err) {
+			c.Redirect(http.StatusFound, "/login")
+			return
+		}
 		slog.Info("GetProfile resolution failed", "actor", actor, "did", did, "err", err)
 		h.Handle404(c)
 		return
@@ -178,6 +184,9 @@ func (h *ProfileHandler) HandleGetProfile(c *gin.Context) {
 
 	profile, err := h.client.GetProfile(c.Request.Context(), did, sessionID, actor)
 	if err != nil {
+		if respondDeadSessionJSON(c, h.client, did, sessionID, err) {
+			return
+		}
 		slog.Info("GetProfile (JSON) failed", "actor", actor, "did", did, "err", err)
 		c.JSON(http.StatusNotFound, gin.H{"error": "profile not found"})
 		return
@@ -203,6 +212,9 @@ func (h *ProfileHandler) HandleGetProfileFeed(c *gin.Context) {
 	mutedWords := fetchMutedWords(c.Request.Context(), h.client, did, sessionID)
 	page, err := h.client.GetAuthorFeed(c.Request.Context(), did, sessionID, actor, cursor, limit, mutedWords)
 	if err != nil {
+		if respondDeadSessionJSON(c, h.client, did, sessionID, err) {
+			return
+		}
 		slog.Error("GetAuthorFeed (JSON) failed", "actor", actor, "did", did, "err", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch author feed"})
 		return

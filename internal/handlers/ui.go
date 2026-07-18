@@ -111,6 +111,12 @@ type LayoutData struct {
 	// instead of the misleading "no posts yet" empty state.
 	FeedError bool
 	RetryURL  string // hx-get URL the failure notice's Retry button re-triggers
+	// SessionExpired marks that the upstream fetch failed because the OAuth session is
+	// DEAD (invalid_grant on refresh — see auth.IsDeadSession), not merely unreachable.
+	// Retrying can never help, so the feed partial renders a distinct "session expired,
+	// sign in again" notice linking to /auth/login instead of the FeedError network notice
+	// with its Retry button. Takes precedence over FeedError in the template.
+	SessionExpired bool
 }
 
 // TemplatesPageData is the data envelope for the templates management page.
@@ -592,6 +598,21 @@ func buildShellLayout(did, sessionID string, user db.User, secret []byte) Layout
 	}
 }
 
+// sessionDead reports whether an upstream fetch failed because the OAuth session is DEAD
+// (invalid_grant on refresh — auth.IsDeadSession), and if so invalidates the session's
+// cached + persisted state so the half-dead cookie/token mismatch is cleared. Callers that
+// render a lazy region set data.SessionExpired on true (the expired notice with a login
+// link); synchronous full-page handlers redirect to /login instead. On false the error is
+// transient and handled as before (the "Bluesky isn't responding" notice / page error).
+func (h *UIHandler) sessionDead(did, sessionID string, err error) bool {
+	if !auth.IsDeadSession(err) {
+		return false
+	}
+	slog.Warn("dead OAuth session; invalidating", "did", did, "err", err)
+	h.feedClient.InvalidateSession(did, sessionID)
+	return true
+}
+
 // HandleFollowingFeedPartial serves HTMX partial responses for the Following feed.
 // Without a cursor it returns the full "feed" block (controls + list).
 // With a cursor it returns just the "feed-more" fragment for sentinel-based pagination.
@@ -605,12 +626,16 @@ func (h *UIHandler) HandleFollowingFeedPartial(c *gin.Context) {
 
 	mutedWords := h.mutedWordsFor(ctx, did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
-	feedErr := false
+	feedErr, sessionExpired := false, false
 	if fetchedPage, err := h.feedClient.GetFollowingFeed(
 		ctx, did, sessionID, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
-		slog.Error("GetFollowingFeed (partial)", "did", did, "err", err)
-		feedErr = true
+		if h.sessionDead(did, sessionID, err) {
+			sessionExpired = true
+		} else {
+			slog.Error("GetFollowingFeed (partial)", "did", did, "err", err)
+			feedErr = true
+		}
 	} else {
 		feedPage = fetchedPage
 	}
@@ -620,11 +645,16 @@ func (h *UIHandler) HandleFollowingFeedPartial(c *gin.Context) {
 		FeedType:    "following",
 		SentinelURL: followingSentinelURL(feedPage.NextCursor),
 	}
-	// Only surface the failure notice on the full-feed load (no cursor). A pagination
-	// (feed-more) failure just stops the infinite scroll — no notice mid-list.
-	if feedErr && cursor == "" {
-		data.FeedError = true
-		data.RetryURL = c.Request.URL.RequestURI()
+	// Only surface a notice on the full-feed load (no cursor). A pagination (feed-more)
+	// failure just stops the infinite scroll — no notice mid-list. A dead session takes
+	// precedence over a transient error.
+	if cursor == "" {
+		if sessionExpired {
+			data.SessionExpired = true
+		} else if feedErr {
+			data.FeedError = true
+			data.RetryURL = c.Request.URL.RequestURI()
+		}
 	}
 
 	tmplName := "feed"
@@ -669,13 +699,17 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 
 	mutedWords := h.mutedWordsFor(ctx, did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
-	feedErr := false
+	feedErr, sessionExpired := false, false
 	if len(tags) > 0 {
 		if fetchedPage, err := h.feedClient.GetHashtagFeed(
 			ctx, did, sessionID, tags, author, cursor, uiFeedLimit, mutedWords,
 		); err != nil {
-			slog.Error("GetHashtagFeed (partial)", "did", did, "tags", tags, "author", author, "err", err)
-			feedErr = true
+			if h.sessionDead(did, sessionID, err) {
+				sessionExpired = true
+			} else {
+				slog.Error("GetHashtagFeed (partial)", "did", did, "tags", tags, "author", author, "err", err)
+				feedErr = true
+			}
 		} else {
 			feedPage = fetchedPage
 		}
@@ -688,9 +722,13 @@ func (h *UIHandler) HandleHashtagFeedPartial(c *gin.Context) {
 		FeedAuthor:  author,
 		SentinelURL: hashtagSentinelURL(tags, author, feedPage.NextCursor),
 	}
-	if feedErr && cursor == "" {
-		data.FeedError = true
-		data.RetryURL = c.Request.URL.RequestURI()
+	if cursor == "" {
+		if sessionExpired {
+			data.SessionExpired = true
+		} else if feedErr {
+			data.FeedError = true
+			data.RetryURL = c.Request.URL.RequestURI()
+		}
 	}
 
 	tmplName := "feed"
@@ -722,12 +760,16 @@ func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
 
 	mutedWords := h.mutedWordsFor(ctx, did, sessionID)
 	feedPage := &feed.FeedPage{Posts: []feed.PostView{}}
-	feedErr := false
+	feedErr, sessionExpired := false, false
 	if fetchedPage, err := h.feedClient.GetCustomFeed(
 		ctx, did, sessionID, feedURI, cursor, uiFeedLimit, mutedWords,
 	); err != nil {
-		slog.Error("GetCustomFeed (partial)", "did", did, "uri", feedURI, "err", err)
-		feedErr = true
+		if h.sessionDead(did, sessionID, err) {
+			sessionExpired = true
+		} else {
+			slog.Error("GetCustomFeed (partial)", "did", did, "uri", feedURI, "err", err)
+			feedErr = true
+		}
 	} else {
 		feedPage = fetchedPage
 	}
@@ -738,9 +780,13 @@ func (h *UIHandler) HandleCustomFeedPartial(c *gin.Context) {
 		FeedCustomURI: feedURI,
 		SentinelURL:   customFeedSentinelURL(feedURI, feedPage.NextCursor),
 	}
-	if feedErr && cursor == "" {
-		data.FeedError = true
-		data.RetryURL = c.Request.URL.RequestURI()
+	if cursor == "" {
+		if sessionExpired {
+			data.SessionExpired = true
+		} else if feedErr {
+			data.FeedError = true
+			data.RetryURL = c.Request.URL.RequestURI()
+		}
 	}
 
 	tmplName := "feed"
@@ -1177,6 +1223,12 @@ func (h *UIHandler) HandleThreadPage(c *gin.Context) {
 
 	threadView, err := h.feedClient.GetThread(c.Request.Context(), did, sessionID, uri, data.MutedWords)
 	if err != nil {
+		// A dead session can't be recovered by re-rendering — send the user to log in
+		// rather than showing a full page whose only content is an error (Part 2c).
+		if h.sessionDead(did, sessionID, err) {
+			c.Redirect(http.StatusFound, "/login")
+			return
+		}
 		switch {
 		case errors.Is(err, feed.ErrThreadNotFound):
 			data.Error = "This post could not be found."
@@ -1247,6 +1299,10 @@ func (h *UIHandler) HandleNotificationsPage(c *gin.Context) {
 
 	page, err := h.feedClient.GetNotifications(c.Request.Context(), did, sessionID, "", uiFeedLimit)
 	if err != nil {
+		if h.sessionDead(did, sessionID, err) {
+			c.Redirect(http.StatusFound, "/login")
+			return
+		}
 		slog.Error("GetNotifications in notifications handler", "did", did, "err", err)
 		data.Error = "Unable to load notifications. Please try again."
 	} else {

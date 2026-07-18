@@ -1,6 +1,8 @@
 {{define "feed"}}
 {{template "feed-controls" .}}
-{{if .FeedError}}
+{{if .SessionExpired}}
+{{template "session-expired-notice" .}}
+{{else if .FeedError}}
 {{template "feed-notice" .}}
 {{else if and .FeedPage .FeedPage.Posts}}
 <ul id="post-list" class="post-list">
@@ -26,6 +28,19 @@
     <p class="feed-notice-body">DraftSky is fine &mdash; the network is having a moment.</p>
     <button type="button" class="btn-retry"
             hx-get="{{.RetryURL}}" hx-target="#feed-root" hx-swap="innerHTML">Retry</button>
+</div>
+{{end}}
+
+{{/* Shown when the upstream fetch failed because the OAuth session is DEAD (invalid_grant
+     on refresh) rather than merely unreachable. Retrying can never help — the only fix is a
+     fresh login — so this replaces the network notice's Retry button with a sign-in link.
+     Links to /login (the page carrying the handle-entry form), NOT /auth/login, which
+     requires a ?handle= param and 400s on a bare GET (verified live 2026-07-18). */}}
+{{define "session-expired-notice"}}
+<div class="feed-notice" role="status">
+    <p class="feed-notice-title">Your session has expired</p>
+    <p class="feed-notice-body">Please sign in again to keep using DraftSky.</p>
+    <a class="btn-retry" href="/login">Sign in again</a>
 </div>
 {{end}}
 

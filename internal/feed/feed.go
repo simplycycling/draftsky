@@ -3,6 +3,7 @@ package feed
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -102,14 +103,29 @@ type FeedPage struct {
 // Client wraps the OAuth ClientApp for feed fetching.
 type Client struct {
 	app *oauth.ClientApp
-	// sessionMu serialises ResumeSession per session so concurrent resumers don't race
-	// to refresh an expired access token. OAuth refresh tokens are single-use (rotated
-	// on refresh): if N goroutines each hit ResumeSession with an expired token at once,
-	// the first rotates the token and the rest fail with invalid_grant ("refresh token
-	// rotated concurrently"). The home shell makes this acute — three regions
-	// (/feed/tabs, /feed/following, the unread poll) fire concurrently on cold load, so
-	// a just-expired token would spuriously degrade one of them. Keyed by sessionID.
-	sessionMu sync.Map // sessionID → *sync.Mutex
+	// sessionCache holds ONE *oauth.ClientSession per sessionID. Reusing a single
+	// ClientSession instance is the actual fix for the concurrent-refresh token burn
+	// (Gotcha 24 → corrected by Gotcha 25). indigo's ResumeSession does NOT refresh; it
+	// just loads session data and builds a fresh ClientSession. The refresh happens
+	// lazily inside DoWithAuth (reactive to a 401) DURING the XRPC call. indigo documents
+	// that a single ClientSession is safe for concurrent use and serialises its own token
+	// refresh via an internal RWMutex, whereas DISTINCT instances for the same session
+	// each refresh the single-use refresh token and clobber one another — the loser sends
+	// the already-rotated token and gets invalid_grant, burning the session. The old code
+	// built a fresh ClientSession per call, so the async shell's concurrent regions hit
+	// exactly that. Caching one instance per session means concurrent fetches share it and
+	// the rotated token is never sent twice. Keyed by sessionID; grows unbounded like the
+	// rate limiter (same tech-debt bucket); evicted on a dead session (see EvictSession).
+	sessionCache sync.Map // sessionID → *sessionEntry
+}
+
+// sessionEntry memoises a single ResumeSession per sessionID. The sync.Once guarantees
+// exactly one ClientSession is built even under concurrent first use, so every caller
+// shares the same instance (and thus the same internally-serialised refresh).
+type sessionEntry struct {
+	once sync.Once
+	sess *oauth.ClientSession
+	err  error
 }
 
 // New returns a Client backed by the given ClientApp.
@@ -117,31 +133,63 @@ func New(app *oauth.ClientApp) *Client {
 	return &Client{app: app}
 }
 
-// lockForSession returns the per-session mutex, creating it on first use.
-func (c *Client) lockForSession(sessionID string) *sync.Mutex {
-	mu, _ := c.sessionMu.LoadOrStore(sessionID, &sync.Mutex{})
-	return mu.(*sync.Mutex)
-}
-
 // resumeAPIClient resolves the OAuth session for did/sessionID and returns an
-// authenticated API client ready to call Bluesky XRPC endpoints. The refresh is
-// serialised per session (see sessionMu): the lock is held only across ResumeSession
-// — the point where a token refresh may rotate the refresh token — and released before
-// the caller's XRPC call, so feed fetches still run concurrently. The first resumer of
-// an expired session refreshes; the rest then see a valid token and skip the refresh.
+// authenticated API client ready to call Bluesky XRPC endpoints. The underlying
+// ClientSession is cached and shared per session (see sessionCache): concurrent callers
+// get an APIClient wrapping the SAME ClientSession, so a token refresh triggered by one
+// fetch is serialised by indigo and the rotated single-use refresh token is never sent by
+// a second, stale instance. A failed resume is not memoised — the entry is dropped so a
+// later request can re-resume.
 func (c *Client) resumeAPIClient(ctx context.Context, did, sessionID string) (*atclient.APIClient, error) {
 	d, err := syntax.ParseDID(did)
 	if err != nil {
 		return nil, fmt.Errorf("invalid DID %q: %w", did, err)
 	}
-	mu := c.lockForSession(sessionID)
-	mu.Lock()
-	sess, err := c.app.ResumeSession(ctx, d, sessionID)
-	mu.Unlock()
-	if err != nil {
-		return nil, fmt.Errorf("resume session: %w", err)
+	v, _ := c.sessionCache.LoadOrStore(sessionID, &sessionEntry{})
+	entry := v.(*sessionEntry)
+	entry.once.Do(func() {
+		entry.sess, entry.err = c.app.ResumeSession(ctx, d, sessionID)
+	})
+	if entry.err != nil {
+		// Resume itself failed (e.g. a store miss). Don't leave a permanently-failed entry
+		// cached: delete it so a subsequent request re-runs ResumeSession. Concurrent losers
+		// of the once observe the same err this round and all issue an idempotent Delete.
+		c.sessionCache.Delete(sessionID)
+		return nil, fmt.Errorf("resume session: %w", entry.err)
 	}
-	return sess.APIClient(), nil
+	return entry.sess.APIClient(), nil
+}
+
+// EvictSession drops the cached ClientSession for sessionID so a stale, unusable instance
+// is not reused. Safe to call for a session that was never cached (no-op). Used by
+// InvalidateSession; exported for callers that only want the in-memory eviction.
+func (c *Client) EvictSession(sessionID string) {
+	c.sessionCache.Delete(sessionID)
+}
+
+// InvalidateSession tears down a session detected as DEAD (auth.IsDeadSession — an
+// invalid_grant refresh failure): it evicts the cached ClientSession and deletes the
+// persisted OAuth session record, clearing the half-dead state where a still-valid session
+// cookie points at unusable tokens. The record delete runs in a detached goroutine with
+// its own context, because the caller is typically about to redirect/return and cancel the
+// request context, yet the row must still be cleared; it is best-effort (the session is
+// dead regardless), so a failure is logged, not returned.
+//
+// MUST only be called for a definitive dead session, never on a transient refresh failure —
+// otherwise a user whose PDS merely hiccuped would be logged out.
+func (c *Client) InvalidateSession(did, sessionID string) {
+	c.sessionCache.Delete(sessionID)
+	d, err := syntax.ParseDID(did)
+	if err != nil || c.app.Store == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := c.app.Store.DeleteSession(ctx, d, sessionID); err != nil {
+			slog.Warn("delete dead oauth session failed", "did", did, "session_id", sessionID, "err", err)
+		}
+	}()
 }
 
 // mapFeedViewPosts converts a slice of FeedViewPost items to PostViews,
